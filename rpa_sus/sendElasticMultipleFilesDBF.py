@@ -5,17 +5,19 @@ import logging
 import os
 import time
 
-from configs.database import ELASTIC_PASSWORD, ELASTIC_USERNAME, CHUNK_SIZE, MAX_RETRIES, RETRY_DELAY, NUM_PROCESSES, ES_INDEX_NAME_PREFIX
+from configs.database import ELASTIC_PASSWORD, ELASTIC_USERNAME, CHUNK_SIZE, ELASTICSEARCH_HOST, MAX_RETRIES, RETRY_DELAY, NUM_PROCESSES, ES_INDEX_NAME_PREFIX
 
 
 # DBF directory path
-dbf_directory = './RD_ACRE'  # Specify the directory containing DBF files
+dbf_directory = './data/RD_ACRE'  # Specify the directory containing DBF files
 
 # Create Elasticsearch client
 es = Elasticsearch(
-    [],
+    [ELASTICSEARCH_HOST],
     basic_auth=(ELASTIC_USERNAME, ELASTIC_PASSWORD),
 ).options(request_timeout=60)
+
+INT_CHUNK_SIZE = int(CHUNK_SIZE)
 
 # Logging setup
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -73,7 +75,7 @@ def parallel_bulk_index(dbf_directory, num_processes=NUM_PROCESSES):
                 # Try different encodings
                 table = DBF(os.path.join(dbf_directory, dbf_file), encoding='latin-1')  # or try 'windows-1252'
                 # Send chunks to the pool for parallel processing
-                pool.starmap(process_chunk, [(data_chunk, index_name) for data_chunk in chunk_records(table, CHUNK_SIZE)])
+                pool.starmap(process_chunk, [(data_chunk, index_name) for data_chunk in chunk_records(table, INT_CHUNK_SIZE)])
             except Exception as e:
                 logging.error(f"Failed to read DBF file {dbf_file}: {str(e)}")
 
