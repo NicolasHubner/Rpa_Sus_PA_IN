@@ -3,11 +3,13 @@
 import { Input } from "@/components/ui/input"
 import {Container} from "@/components/Container/Container";
 import React from "react";
+import { useRouter } from "next/navigation";
+import { AppRouterInstance } from "next/dist/shared/lib/app-router-context.shared-runtime";
 
 
 
 
-const LoginForm = () => {
+const LoginForm = ({router}: {router: AppRouterInstance}) => {
     const emailRef = React.useRef<HTMLInputElement>(null);
     const passwordRef = React.useRef<HTMLInputElement>(null);
 
@@ -20,7 +22,8 @@ const LoginForm = () => {
         console.log('email', email);
         console.log('password', password);
 
-        // Here you can add your login logic
+        router.push('/dashboard')
+
     };
     return (
         <div className="flex items-center justify-center min-h-screen bg-gray-100">
@@ -65,9 +68,12 @@ const LoginForm = () => {
 
 
 export default function Home() {
+
+    const router = useRouter()
+
   return (
     <Container>
-      <LoginForm />
+      <LoginForm router={router} />
     </Container>
   );
 }
