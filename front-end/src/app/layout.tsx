@@ -1,8 +1,10 @@
+import React from "react";
 import { Theme } from "@radix-ui/themes";
 import "@radix-ui/themes/styles.css";
 import type { Metadata } from "next";
 import localFont from "next/font/local";
 import "./globals.css";
+import {ThemeProvider} from "@/components/theme-provider";
 
 
 const geistSans = localFont({
@@ -28,6 +30,12 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
+    <ThemeProvider
+        attribute="class"
+        defaultTheme="dark"
+        enableSystem
+        disableTransitionOnChange
+    >
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
@@ -35,6 +43,7 @@ export default function RootLayout({
           {children}
         </Theme>
       </body>
+    </ThemeProvider>
     </html>
   );
 }

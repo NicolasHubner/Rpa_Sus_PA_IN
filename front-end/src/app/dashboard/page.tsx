@@ -1,15 +1,20 @@
-import { Container } from "@/components/Container/Container";
-import FileUpload from "@/components/DragDrop/DragDrop";
-import { NavBar } from "@/components/NavBar/NavBar";
+"use client"
 
+import React from "react";
+import {SearchStatePaRd} from "@/app/dashboard/___components/search-state-pa-rd";
+import {TableQuickSearch} from "@/app/dashboard/___components/table-quick-search";
+import {FileUpload} from "@/app/dashboard/___components/file-upload";
 
-export default function Home() {
+export default function Component() {
     return (
-        <Container>
-            <NavBar />
-            <h1>asckos</h1>
-
+        <div className="container mx-auto p-4 space-y-8">
+            {/* Section 1: File Upload */}
             <FileUpload />
-        </Container>
+
+            {/* Section 2: Table with Search */}
+            <TableQuickSearch />
+
+            <SearchStatePaRd />
+        </div>
     )
 }
