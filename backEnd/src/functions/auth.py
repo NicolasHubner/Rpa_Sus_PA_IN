@@ -3,7 +3,7 @@ from passlib.context import CryptContext
 from fastapi import HTTPException
 from fastapi.security import OAuth2PasswordBearer
 from ..database import es
-from src.dto.user import UserInDB
+from ...src.dto.user import UserInDB
 
 # Password hashing context
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")

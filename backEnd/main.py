@@ -3,9 +3,9 @@ from fastapi.security import OAuth2PasswordRequestForm
 
 # from functions.auth import authenticate_user, create_user, get_user
 
-from src.functions.auth import authenticate_user, create_user, get_user, oauth2_scheme
-from src.dto.user import User, UserInDB
-from src.dto.token import Token
+from .src.functions.auth import authenticate_user, create_user, get_user, oauth2_scheme
+from .src.dto.user import User, UserInDB
+from .src.dto.token import Token
 
 
 
