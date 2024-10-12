@@ -1,6 +1,6 @@
 from elasticsearch import Elasticsearch
 
-from ..configs.database import ELASTIC_PASSWORD, ELASTIC_USERNAME, ELASTICSEARCH_HOST
+from configs.database import ELASTIC_PASSWORD, ELASTIC_USERNAME, ELASTICSEARCH_HOST
 
 
 es = Elasticsearch(
