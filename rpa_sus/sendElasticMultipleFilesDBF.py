@@ -1,3 +1,4 @@
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from dbfread import DBF
 from elasticsearch import Elasticsearch, helpers
 from multiprocessing import Pool
@@ -43,23 +44,16 @@ def chunk_records(records, chunk_size=CHUNK_SIZE):
 
 # Function to process a chunk of data and send it to Elasticsearch
 def process_chunk(data_chunk, index_name):
-    """Indexes a chunk of data into Elasticsearch with retries."""
-    actions = [prepare_es_doc(record, index_name) for record in data_chunk if record]  # Skip None records
-
+    actions = [prepare_es_doc(record, index_name) for record in data_chunk if record]
     if actions:
-        # Log when chunk is ready to be indexed
         logging.info(f"Sending chunk of size {len(actions)} to Elasticsearch for index '{index_name}'.")
-
         for attempt in range(MAX_RETRIES):
             try:
-                # Use the helpers.bulk and capture the response
                 response = helpers.bulk(es, actions, chunk_size=CHUNK_SIZE)
                 logging.info(f"Successfully indexed {len(actions)} documents to index '{index_name}'.")
-
                 if response[0] < len(actions):
                     logging.error(f"Failed to index {len(actions) - response[0]} documents in chunk for index '{index_name}'.")
-
-                break  # Exit retry loop if successful
+                break
             except Exception as e:
                 logging.error(f"Error during bulk indexing to {index_name} (attempt {attempt + 1}/{MAX_RETRIES}): {str(e)}")
                 time.sleep(RETRY_DELAY)
@@ -68,36 +62,35 @@ def process_chunk(data_chunk, index_name):
     else:
         logging.warning(f"No valid documents to index in this chunk for index '{index_name}'.")
 
+
 # Function to handle parallel processing using multiprocessing.Pool
-def parallel_bulk_index(dbf_directory, num_processes=NUM_PROCESSES):
-    """Extracts data from multiple DBF files, splits it into chunks, and indexes using multiprocessing."""
+def parallel_bulk_index(dbf_directory):
     start_time = time.time()
-    logging.info(f"Starting parallel indexing process with {num_processes} processes.")
+    logging.info(f"Starting parallel indexing process.")
 
-    # List all DBF files in the directory
     dbf_files = [f for f in os.listdir(dbf_directory) if f.endswith('.dbf')]
-    logging.info(f"Found {len(dbf_files)} DBF files to process.")
-
-    # Use Pool to parallelize the processing of chunks
-    with Pool(processes=num_processes) as pool:
+    tasks = []
+    
+    with ProcessPoolExecutor(max_workers=NUM_PROCESSES) as executor:
         for dbf_file in dbf_files:
-            # Create a unique index name in lowercase and with underscores
             index_name = f'{ES_INDEX_NAME_PREFIX}{os.path.splitext(dbf_file)[0]}'.lower().replace(' ', '_').replace('-', '_')
-
             try:
-                # Try different encodings
                 logging.info(f"Reading DBF file: {dbf_file}")
-                table = DBF(os.path.join(dbf_directory, dbf_file), encoding='latin-1')  # or try 'windows-1252'
-
-                # Send chunks to the pool for parallel processing
-                logging.info(f"Starting processing of {len(table)} records in file '{dbf_file}'.")
-                pool.starmap(process_chunk, [(data_chunk, index_name) for data_chunk in chunk_records(table, INT_CHUNK_SIZE)])
+                table = DBF(os.path.join(dbf_directory, dbf_file), encoding='latin-1')
+                for data_chunk in chunk_records(table, INT_CHUNK_SIZE):
+                    tasks.append(executor.submit(process_chunk, data_chunk, index_name))
             except Exception as e:
                 logging.error(f"Failed to read DBF file {dbf_file}: {str(e)}")
 
-    end_time = time.time()
-    elapsed_time = end_time - start_time
+        for future in as_completed(tasks):
+            try:
+                future.result()  # Will raise an exception if one occurred in `process_chunk`
+            except Exception as exc:
+                logging.error(f"An error occurred: {exc}")
+
+    elapsed_time = time.time() - start_time
     logging.info(f"Data extraction and indexing took: {elapsed_time:.2f} seconds.")
+
 
 # Start the parallel indexing process
 if __name__ == "__main__":
