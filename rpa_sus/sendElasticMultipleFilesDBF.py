@@ -87,35 +87,6 @@ def process_chunk(data_chunk, index_name):
         logging.error(f"Failed to index chunk after {MAX_RETRIES} attempts.")
 
 
-# Function to handle parallel processing using multiprocessing.Pool
-# def parallel_bulk_index(dbf_directory):
-    start_time = time.time()
-    logging.info(f"Starting parallel indexing process.")
-
-    dbf_files = [f for f in os.listdir(dbf_directory) if f.endswith('.dbf')]
-    tasks = []
-    
-    with ProcessPoolExecutor(max_workers=NUM_PROCESSES) as executor:
-        for dbf_file in dbf_files:
-            index_name = f'{ES_INDEX_NAME_PREFIX}{os.path.splitext(dbf_file)[0]}'.lower().replace(' ', '_').replace('-', '_')
-            try:
-                logging.info(f"Reading DBF file: {dbf_file}")
-                table = DBF(os.path.join(dbf_directory, dbf_file), encoding='latin-1')
-                for data_chunk in chunk_records(table, INT_CHUNK_SIZE):
-                    tasks.append(executor.submit(process_chunk, data_chunk, index_name))
-            except Exception as e:
-                logging.error(f"Failed to read DBF file {dbf_file}: {str(e)}")
-
-        for future in as_completed(tasks):
-            try:
-                future.result()  # Will raise an exception if one occurred in `process_chunk`
-            except Exception as exc:
-                logging.error(f"An error occurred: {exc}")
-
-    elapsed_time = time.time() - start_time
-    logging.info(f"Data extraction and indexing took: {elapsed_time:.2f} seconds.")
-
-
 def parallel_bulk_index(dbf_directory):
     start_time = time.time()
     logging.info("Starting parallel indexing process.")
