@@ -9,7 +9,9 @@ import time
 from configs.database import ELASTIC_PASSWORD, ELASTIC_USERNAME, CHUNK_SIZE, ELASTICSEARCH_HOST, MAX_RETRIES, RETRY_DELAY, NUM_PROCESSES, ES_INDEX_NAME_PREFIX
 
 # DBF directory path
-dbf_directory = './data/bahia/PA_ACIMA_2008/teste'  # Specify the directory containing DBF files
+#dbf_directory = './data/bahia/PA_ACIMA_2008/teste'  # Specify the directory containing DBF files
+
+dbf_directory = '/mnt/volume_nyc1_01/nicolas/alagoas/PA_ACIMA_2008'
 
 # Create Elasticsearch client
 es = Elasticsearch(
@@ -34,33 +36,33 @@ def prepare_es_doc(record, index_name):
         logging.error(f"Error preparing document for index {index_name}: {str(e)}")
         return None  # Skip this document
 
-# Function to chunk records into smaller batches
+# Function to chunk records into smaller batche
 def chunk_records(records, chunk_size=CHUNK_SIZE):
     """Generator that yields chunks of records from the DBF table."""
-    record_list = list(records)
-    for i in range(0, len(record_list), chunk_size):
-        logging.debug(f"Yielding chunk starting from index {i}")
-        yield record_list[i:i + chunk_size]
+    current_chunk = []
+    for record in records:
+        current_chunk.append(record)
+        if len(current_chunk) >= chunk_size:
+            yield current_chunk
+            current_chunk = []
+    if current_chunk:
+        yield current_chunk  # Yield remaining records if any
+
 
 # Function to process a chunk of data and send it to Elasticsearch
 def process_chunk(data_chunk, index_name):
-    actions = [prepare_es_doc(record, index_name) for record in data_chunk if record]
-    if actions:
-        logging.info(f"Sending chunk of size {len(actions)} to Elasticsearch for index '{index_name}'.")
-        for attempt in range(MAX_RETRIES):
-            try:
-                response = helpers.bulk(es, actions, chunk_size=CHUNK_SIZE)
-                logging.info(f"Successfully indexed {len(actions)} documents to index '{index_name}'.")
-                if response[0] < len(actions):
-                    logging.error(f"Failed to index {len(actions) - response[0]} documents in chunk for index '{index_name}'.")
-                break
-            except Exception as e:
-                logging.error(f"Error during bulk indexing to {index_name} (attempt {attempt + 1}/{MAX_RETRIES}): {str(e)}")
-                time.sleep(RETRY_DELAY)
-        else:
-            logging.error(f"Failed to index chunk of {len(actions)} documents after {MAX_RETRIES} attempts to index '{index_name}'.")
+    actions = (prepare_es_doc(record, index_name) for record in data_chunk if record)
+    for attempt in range(MAX_RETRIES):
+        try:
+            for ok, _ in streaming_bulk(es, actions, chunk_size=CHUNK_SIZE):
+                if not ok:
+                    logging.error("A document failed to index.")
+            break
+        except Exception as e:
+            logging.error(f"Error during bulk indexing to {index_name} (attempt {attempt + 1}/{MAX_RETRIES}): {str(e)}")
+            time.sleep(RETRY_DELAY)
     else:
-        logging.warning(f"No valid documents to index in this chunk for index '{index_name}'.")
+        logging.error(f"Failed to index chunk after {MAX_RETRIES} attempts.")
 
 
 # Function to handle parallel processing using multiprocessing.Pool

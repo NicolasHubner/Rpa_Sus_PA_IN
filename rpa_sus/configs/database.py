@@ -1,4 +1,6 @@
 from dotenv import load_dotenv
+import multiprocessing
+
 import os
 load_dotenv()
 
@@ -11,4 +13,5 @@ ELASTIC_PASSWORD = os.getenv('DATABASE_ELASTIC_PASSWORD')
 
 MAX_RETRIES = 3  # Max retry attempts for failed chunks
 RETRY_DELAY = 5  # Delay (in seconds) between retry attempts
+NUM_PROCESSES = max(1, multiprocessing.cpu_count() - 2)
 NUM_PROCESSES = 8  # Number of parallel processes
