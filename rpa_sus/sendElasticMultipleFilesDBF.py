@@ -9,9 +9,9 @@ import time
 from configs.database import ELASTIC_PASSWORD, ELASTIC_USERNAME, CHUNK_SIZE, ELASTICSEARCH_HOST, MAX_RETRIES, RETRY_DELAY, NUM_PROCESSES, ES_INDEX_NAME_PREFIX
 
 # DBF directory path
-#dbf_directory = './data/bahia/PA_ACIMA_2008/teste'  # Specify the directory containing DBF files
+dbf_directory = './data/ceara/PA_ACIMA_2008'  # Specify the directory containing DBF files
 
-dbf_directory = '/mnt/volume_nyc1_01/nicolas/alagoas/PA_ACIMA_2008'
+# dbf_directory = '/mnt/volume_nyc1_01/nicolas/alagoas/PA_ACIMA_2008'
 
 # Create Elasticsearch client
 es = Elasticsearch(
