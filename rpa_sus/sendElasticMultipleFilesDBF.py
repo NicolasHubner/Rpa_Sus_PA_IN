@@ -1,6 +1,6 @@
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dbfread import DBF
-from elasticsearch import Elasticsearch, helpers, streaming_bulk
+from elasticsearch import Elasticsearch, helpers
 from multiprocessing import Pool
 import logging
 import os
@@ -76,7 +76,7 @@ def process_chunk(data_chunk, index_name):
     actions = (prepare_es_doc(record, index_name) for record in data_chunk if record)
     for attempt in range(MAX_RETRIES):
         try:
-            for ok, _ in streaming_bulk(es, actions, chunk_size=CHUNK_SIZE):
+            for ok, _ in helpers.streaming_bulk(es, actions, chunk_size=CHUNK_SIZE):
                 if not ok:
                     logging.error("A document failed to index.")
             break
