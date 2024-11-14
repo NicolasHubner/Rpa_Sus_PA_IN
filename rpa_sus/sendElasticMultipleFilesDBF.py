@@ -1,6 +1,6 @@
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dbfread import DBF
-from elasticsearch import Elasticsearch, helpers
+from elasticsearch import Elasticsearch, helpers, streaming_bulk
 from multiprocessing import Pool
 import logging
 import os
@@ -24,29 +24,51 @@ INT_CHUNK_SIZE = int(CHUNK_SIZE)
 # Logging setup
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# Function to process a single record into Elasticsearch document format
-def prepare_es_doc(record, index_name):
-    try:
-        logging.debug(f"Preparing document for record: {record}")
-        return {
-            '_index': index_name,
-            '_source': {k: str(v) if v is not None else None for k, v in record.items()}
-        }
-    except Exception as e:
-        logging.error(f"Error preparing document for index {index_name}: {str(e)}")
-        return None  # Skip this document
+# # Function to process a single record into Elasticsearch document format
+# def prepare_es_doc(record, index_name):
+#     try:
+#         logging.debug(f"Preparing document for record: {record}")
+#         return {
+#             '_index': index_name,
+#             '_source': {k: str(v) if v is not None else None for k, v in record.items()}
+#         }
+#     except Exception as e:
+#         logging.error(f"Error preparing document for index {index_name}: {str(e)}")
+#         return None  # Skip this document
 
-# Function to chunk records into smaller batche
-def chunk_records(records, chunk_size=CHUNK_SIZE):
+def prepare_es_doc(record, index_name, fields_to_include=None):
+    if fields_to_include:
+        record = {k: v for k, v in record.items() if k in fields_to_include}
+    return {
+        '_index': index_name,
+        '_source': {k: str(v) if v is not None else None for k, v in record.items()}
+    }
+
+
+# # Function to chunk records into smaller batche
+# def chunk_records(records, chunk_size=CHUNK_SIZE):
+#     """Generator that yields chunks of records from the DBF table."""
+#     current_chunk = []
+#     for record in records:
+#         current_chunk.append(record)
+#         if len(current_chunk) >= chunk_size:
+#             yield current_chunk
+#             current_chunk = []
+#     if current_chunk:
+#         yield current_chunk  # Yield remaining records if any
+
+def read_in_batches(file_path, chunk_size):
     """Generator that yields chunks of records from the DBF table."""
-    current_chunk = []
-    for record in records:
-        current_chunk.append(record)
-        if len(current_chunk) >= chunk_size:
-            yield current_chunk
-            current_chunk = []
-    if current_chunk:
-        yield current_chunk  # Yield remaining records if any
+    table = DBF(file_path, encoding='latin-1', ignore_missing_memofile=True)
+    batch = []
+    for record in table:
+        batch.append(record)
+        if len(batch) == chunk_size:
+            yield batch
+            batch = []  # Clear the batch after yielding
+    if batch:  # Yield any remaining records in the final batch
+        yield batch
+
 
 
 # Function to process a chunk of data and send it to Elasticsearch
@@ -66,7 +88,7 @@ def process_chunk(data_chunk, index_name):
 
 
 # Function to handle parallel processing using multiprocessing.Pool
-def parallel_bulk_index(dbf_directory):
+# def parallel_bulk_index(dbf_directory):
     start_time = time.time()
     logging.info(f"Starting parallel indexing process.")
 
@@ -80,6 +102,34 @@ def parallel_bulk_index(dbf_directory):
                 logging.info(f"Reading DBF file: {dbf_file}")
                 table = DBF(os.path.join(dbf_directory, dbf_file), encoding='latin-1')
                 for data_chunk in chunk_records(table, INT_CHUNK_SIZE):
+                    tasks.append(executor.submit(process_chunk, data_chunk, index_name))
+            except Exception as e:
+                logging.error(f"Failed to read DBF file {dbf_file}: {str(e)}")
+
+        for future in as_completed(tasks):
+            try:
+                future.result()  # Will raise an exception if one occurred in `process_chunk`
+            except Exception as exc:
+                logging.error(f"An error occurred: {exc}")
+
+    elapsed_time = time.time() - start_time
+    logging.info(f"Data extraction and indexing took: {elapsed_time:.2f} seconds.")
+
+
+def parallel_bulk_index(dbf_directory):
+    start_time = time.time()
+    logging.info("Starting parallel indexing process.")
+
+    dbf_files = [f for f in os.listdir(dbf_directory) if f.endswith('.dbf')]
+    tasks = []
+    
+    with ProcessPoolExecutor(max_workers=NUM_PROCESSES) as executor:
+        for dbf_file in dbf_files:
+            index_name = f"{ES_INDEX_NAME_PREFIX}{os.path.splitext(dbf_file)[0]}".lower().replace(" ", "_").replace("-", "_")
+            dbf_file_path = os.path.join(dbf_directory, dbf_file)
+            try:
+                logging.info(f"Reading DBF file: {dbf_file}")
+                for data_chunk in read_in_batches(dbf_file_path, INT_CHUNK_SIZE):
                     tasks.append(executor.submit(process_chunk, data_chunk, index_name))
             except Exception as e:
                 logging.error(f"Failed to read DBF file {dbf_file}: {str(e)}")
