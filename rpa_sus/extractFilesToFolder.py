@@ -2,7 +2,7 @@ import os
 import zipfile
 
 # Define the main directory containing the subfolders
-main_folder = './data/minas_gerais'
+main_folder = './data/minas_gerais/Part4'
 extract_folder = './data/minas_gerais/PA_ACIMA_2008'
 
 # Create the destination folder if it doesn't exist
