@@ -1,7 +1,6 @@
-import {Select, SelectContent, SelectItem, SelectTrigger, SelectValue} from "@/components/ui/select";
-import {dataEstadosBrasil} from "@/utils/constants/state-brasil";
-import {Button} from "@/components/ui/button";
-import React, {useRef, useState} from "react";
+import { Button } from "@/components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import React, { useRef, useState } from "react";
 
 export const FileUpload = () => {
     const [file, setFile] = useState<File | null>(null)
@@ -42,7 +41,7 @@ export const FileUpload = () => {
                         <SelectItem value="RD">RD</SelectItem>
                     </SelectContent>
                 </Select>
-                <Select>
+                {/* <Select>
                     <SelectTrigger>
                         <SelectValue placeholder="Estado"/>
                     </SelectTrigger>
@@ -53,7 +52,7 @@ export const FileUpload = () => {
                             </SelectItem>
                         ))}
                     </SelectContent>
-                </Select>
+                </Select> */}
             </div>
             <div
                 className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center cursor-pointer mb-4"

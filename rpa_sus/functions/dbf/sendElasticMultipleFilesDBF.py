@@ -1,7 +1,6 @@
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dbfread import DBF
 from elasticsearch import Elasticsearch, helpers
-from multiprocessing import Pool
 import logging
 import os
 import time
@@ -9,7 +8,7 @@ import time
 from configs.database import ELASTIC_PASSWORD, ELASTIC_USERNAME, CHUNK_SIZE, ELASTICSEARCH_HOST, MAX_RETRIES, RETRY_DELAY, NUM_PROCESSES, ES_INDEX_NAME_PREFIX
 
 # DBF directory path
-dbf_directory = './data/ceara/PA_ACIMA_2008'  # Specify the directory containing DBF files
+dbf_directory = './data/pa_acre'  # Specify the directory containing DBF files
 
 # dbf_directory = '/mnt/volume_nyc1_01/nicolas/alagoas/PA_ACIMA_2008'
 
@@ -24,38 +23,16 @@ INT_CHUNK_SIZE = int(CHUNK_SIZE)
 # Logging setup
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# # Function to process a single record into Elasticsearch document format
-# def prepare_es_doc(record, index_name):
-#     try:
-#         logging.debug(f"Preparing document for record: {record}")
-#         return {
-#             '_index': index_name,
-#             '_source': {k: str(v) if v is not None else None for k, v in record.items()}
-#         }
-#     except Exception as e:
-#         logging.error(f"Error preparing document for index {index_name}: {str(e)}")
-#         return None  # Skip this document
 
 def prepare_es_doc(record, index_name, fields_to_include=None):
     if fields_to_include:
         record = {k: v for k, v in record.items() if k in fields_to_include}
     return {
         '_index': index_name,
-        '_source': {k: str(v) if v is not None else None for k, v in record.items()}
+        '_source': {k: str(v) if v is not None else None for k, v in record.items()},
     }
 
 
-# # Function to chunk records into smaller batche
-# def chunk_records(records, chunk_size=CHUNK_SIZE):
-#     """Generator that yields chunks of records from the DBF table."""
-#     current_chunk = []
-#     for record in records:
-#         current_chunk.append(record)
-#         if len(current_chunk) >= chunk_size:
-#             yield current_chunk
-#             current_chunk = []
-#     if current_chunk:
-#         yield current_chunk  # Yield remaining records if any
 
 def read_in_batches(file_path, chunk_size):
     """Generator that yields chunks of records from the DBF table."""
@@ -71,7 +48,8 @@ def read_in_batches(file_path, chunk_size):
 
 
 
-# Function to process a chunk of data and send it to Elasticsearch
+# # Function to process a chunk of data and send it to Elasticsearch
+
 def process_chunk(data_chunk, index_name):
     actions = (prepare_es_doc(record, index_name) for record in data_chunk if record)
     for attempt in range(MAX_RETRIES):
@@ -85,6 +63,7 @@ def process_chunk(data_chunk, index_name):
             time.sleep(RETRY_DELAY)
     else:
         logging.error(f"Failed to index chunk after {MAX_RETRIES} attempts.")
+
 
 
 def parallel_bulk_index(dbf_directory):

@@ -1,5 +1,10 @@
+import json
+from elastic_transport import ListApiResponse
 from fastapi import FastAPI, HTTPException, Depends
+from fastapi.responses import JSONResponse
 from fastapi.security import OAuth2PasswordRequestForm
+
+from backEnd.src.functions.databases import search_database, search_state_database
 
 # from functions.auth import authenticate_user, create_user, get_user
 
@@ -7,7 +12,7 @@ from .src.functions.auth import authenticate_user, create_user, get_user, oauth2
 from .src.dto.user import User, UserInDB
 from .src.dto.token import Token
 
-
+from .src.database import es
 
 # Initialize FastAPI app
 app = FastAPI()
@@ -51,15 +56,40 @@ async def upload_file(file):
     return upload_file(file)
 
 # 3. Rota de Busca rapida(colocar 50 elementos)
-@app.get("/search", response_model=User)
-async def search(query):
-    return search(query)
+@app.get("/search")
+async def search():
+    try:
+        response = await search_database()
+        return JSONResponse(content=response.body)
+    except Exception as e:
+        return {"error": str(e)}
 
 # 4. Rota de Busca de Estado/Mês/Ano Mostrar Tnato PA/RD - Qtd de Registro - Total de gasto
-@app.get("/search/state", response_model=User)
-async def search_state(state, month, year):
-    return search_state(state, month, year)
+@app.get("/search/state")
+async def search_state():
+    try:
+        response = await search_state_database()
 
+        body_response = response.body
+
+        data = {
+            "ALL": {
+                "qtde": body_response["aggregations"]["total_documents"]["value"],
+                 "total": round(response["aggregations"]["total_sum"]["value"],2)
+            },
+            
+            "PA": {
+                "qtde": body_response["aggregations"]["tipos"]["buckets"][0]["total_documents"]["value"], 
+                "total": round(body_response["aggregations"]["tipos"]["buckets"][0]["total_sum"]["value"],2)
+                },
+            "RD": {
+                "qtde": body_response["aggregations"]["tipos"]["buckets"][1]["total_documents"]["value"], 
+                "total": round(body_response["aggregations"]["tipos"]["buckets"][1]["total_sum"]["value"],2)},
+        }
+        return JSONResponse(content=data)
+    except Exception as e:
+        return {"error": str(e)}    
+    
 # Run the application
 if __name__ == "__main__":
     import uvicorn
