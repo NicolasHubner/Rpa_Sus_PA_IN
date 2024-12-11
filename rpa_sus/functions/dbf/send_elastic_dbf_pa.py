@@ -136,8 +136,11 @@ def parallel_bulk_index(dbf_directory):
                 logging.error(f"An error occurred: {exc}")
 
     elapsed_time = time.time() - start_time
+
+    elapsed_minutes = elapsed_time // 60
+    elapsed_seconds = elapsed_time % 60
     logging.info(
-        f"Data extraction and indexing took: {elapsed_time:.2f} seconds.")
+        f"Data extraction and indexing took: {int(elapsed_minutes)} minutes and {elapsed_seconds:.2f} seconds.")
 
 
 # Start the parallel indexing process
