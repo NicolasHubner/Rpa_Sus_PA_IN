@@ -1,4 +1,6 @@
 from concurrent.futures import ProcessPoolExecutor, as_completed
+from datetime import datetime
+import datetime
 from dbfread import DBF
 from elasticsearch import Elasticsearch, helpers
 import logging
@@ -6,7 +8,7 @@ import os
 import time
 
 from configs.database import ELASTICSEARCH_HOST, ES_INDEX_NAME_PREFIX, CHUNK_SIZE, MAX_RETRIES, RETRY_DELAY, NUM_PROCESSES, ELASTIC_USERNAME, ELASTIC_PASSWORD
-from configs.constants import COLUMNS_TO_WATCH, state_codes
+from configs.constants import CARATEND_CODES, COLUMNS_TO_WATCH, state_codes, FINANC_CODES, FAECTP_CODES
 
 
 # DBF directory path
@@ -31,12 +33,68 @@ logging.basicConfig(level=logging.INFO,
 state_code_to_name = {str(code).zfill(
     2): name for name, code in state_codes.items()}
 
+# # Precomputed mapping for financial codes
+financ_codes_to_name = {str(code): name for name, code in FINANC_CODES.items()}
+
+# # Precomputed mapping for faectp codes
+faectp_codes_to_name = {str(code): name for name, code in FAECTP_CODES.items()}
+
+# # Precomputed mapping for caratend codes
+caratend_codes_to_name = {
+    str(code): name for name, code in CARATEND_CODES.items()}
+
+
+def get_mapped_value(code, mapping, default="Unknown"):
+    """Helper function to get mapped value from a dictionary."""
+    return mapping.get(str(code), default)
+
+
+def handle_date_conversion(date_value):
+    """Helper function to convert date to yyyyMM format."""
+    try:
+        # Assuming date_value is in the format YYYYMM or a valid integer
+        return datetime.datetime.strptime(str(date_value), "%Y%m").strftime("%Y%m")
+    except ValueError:
+        return None
+
 
 def prepare_es_doc(record, index_name, fields_to_include=COLUMNS_TO_WATCH):
+    # if fields_to_include:
+    #     record = {k: v for k, v in record.items() if k in fields_to_include}
+    # uf_code = str(record.get("PA_UFMUN", ""))[:2]
+    # record["PA_UFMUN"] = state_code_to_name.get(uf_code, "Unknown")
+    # # Filter record to include only specified fields
     if fields_to_include:
         record = {k: v for k, v in record.items() if k in fields_to_include}
+
+    # Handle PA_UFMUN conversion
     uf_code = str(record.get("PA_UFMUN", ""))[:2]
-    record["PA_UFMUN"] = state_code_to_name.get(uf_code, "Unknown")
+    record["PA_UFMUN"] = get_mapped_value(uf_code, state_code_to_name)
+
+    # Handle PA_CMP conversion to yyyyMM format
+    pa_cmp = record.get("PA_CMP", "")
+    if pa_cmp:
+        record["PA_CMP"] = handle_date_conversion(pa_cmp)
+        if record["PA_CMP"]:
+            record["@timestamp"] = record["PA_CMP"]
+
+    # Handle PA_TPFIN conversion to financial code
+    pa_tpfin = record.get("PA_TPFIN", "")
+    if pa_tpfin:
+        record["PA_TPFIN"] = get_mapped_value(pa_tpfin, financ_codes_to_name)
+
+    # Handle PA_SUBFIN conversion to faectp code
+    pa_subfin = record.get("PA_SUBFIN", "")
+    if pa_subfin:
+        record["PA_SUBFIN"] = get_mapped_value(pa_subfin, faectp_codes_to_name)
+
+    # Handle PA_CARATEND conversion to caratend code
+    pa_caratend = record.get("PA_CARATEND", "")
+    if pa_caratend:
+        record["PA_CARATEND"] = get_mapped_value(
+            pa_caratend, caratend_codes_to_name)
+
+    # Prepare the final document
     return {
         '_index': index_name,
         '_source': {k: str(v) if v is not None else None for k, v in record.items()},
@@ -62,8 +120,8 @@ def ensure_index_exists(index_name):
                     "PA_CATEND": {"type": "keyword"},
                     "PA_QTDPRO": {"type": "integer"},
                     "PA_QTDAPR": {"type": "integer"},
-                    "PA_VALPRO": {"type": "keyword"},
-                    "PA_VALAPR": {"type": "keyword"},
+                    "PA_VALPRO": {"type": "float"},
+                    "PA_VALAPR": {"type": "float"},
                 }
             }
         })
