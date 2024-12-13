@@ -1,8 +1,10 @@
+import base64
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from datetime import datetime
 import datetime
-from typing import Dict, List, Optional
+import json
 from dbfread import DBF
+from elastic_transport import NodeConfig, Transport
 from elasticsearch import Elasticsearch, helpers
 import logging
 import os
@@ -17,11 +19,78 @@ dbf_directory = './data/pa_acre'  # Specify the directory containing DBF files
 
 # dbf_directory = '/mnt/volume_nyc1_01/nicolas/alagoas/PA_ACIMA_2008'
 
-# Create Elasticsearch client
-es = Elasticsearch(
-    [ELASTICSEARCH_HOST],
-    basic_auth=(ELASTIC_USERNAME, ELASTIC_PASSWORD),
-).options(request_timeout=60)
+
+def debug_sniff_callback(transport, options):
+    """Enhanced debugging for sniff callback with explicit authentication"""
+    try:
+        print("Attempting to sniff nodes...")
+
+        # Use the same authentication method as the main connection
+        response = transport.perform_request(
+            "GET",
+            "/_nodes/http",
+            # Explicitly pass authentication
+            headers={
+                "Authorization": f"Basic {base64.b64encode(f'{ELASTIC_USERNAME}:{ELASTIC_PASSWORD}'.encode()).decode()}"
+            }
+        )
+
+        print("Raw Response:", response)
+
+        # Ensure response has body attribute or is a dictionary
+        body = response.body if hasattr(response, 'body') else response
+
+        if "nodes" not in body:
+            print("Warning: 'nodes' key not found in response")
+            return []
+
+        sniffed_nodes = []
+        for node_id, node_info in body["nodes"].items():
+            try:
+                # More robust parsing of publish address
+                publish_address = node_info["http"]["publish_address"]
+                # Handle different possible formats of publish address
+                if ':' in publish_address:
+                    host, port = publish_address.split(":")
+                else:
+                    host, port = publish_address, "9200"
+
+                node = NodeConfig(
+                    host=host.strip('[]'),  # Remove square brackets for IPv6
+                    port=int(port),
+                    scheme="http" if not node_info.get(
+                        "https", {}).get("enabled") else "https"
+                )
+                sniffed_nodes.append(node)
+                print(f"Discovered node: {node}")
+            except Exception as node_error:
+                print(f"Error processing node {node_id}: {node_error}")
+
+        return sniffed_nodes
+
+    except Exception as e:
+        print(f"Sniff callback failed: {e}")
+        return []
+
+
+# Node configurations with error handling
+node_configs = [
+    NodeConfig(
+        host="localhost",
+        port=9200,
+        scheme="http",
+    )
+]
+
+# Create Elasticsearch client with comprehensive error handling
+try:
+    es_client = Elasticsearch(
+        [ELASTICSEARCH_HOST],
+        basic_auth=(ELASTIC_USERNAME, ELASTIC_PASSWORD),
+    ).options(request_timeout=60)
+except Exception as connection_error:
+    print(f"Elasticsearch connection failed: {connection_error}")
+
 
 INT_CHUNK_SIZE = int(CHUNK_SIZE)
 
@@ -63,29 +132,29 @@ def prepare_es_doc(record, index_name, fields_to_include=COLUMNS_TO_WATCH):
     uf_code = str(record.get("PA_UFMUN", ""))[:2]
     record["PA_UFMUN"] = get_mapped_value(uf_code, code_to_state)
 
-    # Handle PA_CMP conversion to yyyyMM format
-    pa_cmp = record.get("PA_CMP", "")
-    if pa_cmp:
-        record["PA_CMP"] = handle_date_conversion(pa_cmp)
-        if record["PA_CMP"]:
-            record["@timestamp"] = record["PA_CMP"]
+    # # Handle PA_CMP conversion to yyyyMM format
+    # pa_cmp = record.get("PA_CMP", "")
+    # if pa_cmp:
+    #     record["PA_CMP"] = handle_date_conversion(pa_cmp)
+    #     if record["PA_CMP"]:
+    #         record["@timestamp"] = record["PA_CMP"]
 
-    # Handle PA_TPFIN conversion to financial code
-    pa_tpfin = record.get("PA_TPFIN", "")
-    if pa_tpfin:
-        record["PA_TPFIN"] = get_mapped_value(pa_tpfin, financ_codes_to_name)
+    # # Handle PA_TPFIN conversion to financial code
+    # pa_tpfin = record.get("PA_TPFIN", "")
+    # if pa_tpfin:
+    #     record["PA_TPFIN"] = get_mapped_value(pa_tpfin, financ_codes_to_name)
 
-    # Handle PA_SUBFIN conversion to faectp code (with validation for integer type)
-    pa_subfin = record.get("PA_SUBFIN", "")
-    if pa_subfin:
-        pa_subfin = pa_subfin.lstrip('0')
-        record["PA_SUBFIN"] = get_mapped_value(pa_subfin, FAECTP_CODES)
+    # # Handle PA_SUBFIN conversion to faectp code (with validation for integer type)
+    # pa_subfin = record.get("PA_SUBFIN", "")
+    # if pa_subfin:
+    #     pa_subfin = pa_subfin.lstrip('0')
+    #     record["PA_SUBFIN"] = get_mapped_value(pa_subfin, FAECTP_CODES)
 
-    # Handle PA_CARATEND conversion to caratend code
-    pa_caratend = record.get("PA_CATEND", "")
-    if pa_caratend:
-        record["PA_CATEND"] = get_mapped_value(
-            pa_caratend, CARATEND_CODES)
+    # # Handle PA_CARATEND conversion to caratend code
+    # pa_caratend = record.get("PA_CATEND", "")
+    # if pa_caratend:
+    #     record["PA_CATEND"] = get_mapped_value(
+    #         pa_caratend, CARATEND_CODES)
 
     # Prepare the final document
     return {
@@ -96,8 +165,8 @@ def prepare_es_doc(record, index_name, fields_to_include=COLUMNS_TO_WATCH):
 
 def ensure_index_exists(index_name: str):
     # Check if the index exists and create it if not
-    if not es.indices.exists(index=index_name):
-        es.indices.create(
+    if not es_client.indices.exists(index=index_name):
+        es_client.indices.create(
             index=index_name,
             body={
                 "mappings": {
@@ -137,7 +206,13 @@ def read_in_batches(file_path, chunk_size):
         yield batch
 
 
+def log_bulk_size(actions):
+    size_in_bytes = sum(len(json.dumps(action)) for action in actions)
+    print(f"Bulk request size: {size_in_bytes} bytes")
+
 # # Function to process a chunk of data and send it to Elasticsearch
+
+
 def process_chunk(data_chunk, index_name):
     """Process a chunk of data and send it to Elasticsearch."""
     try:
@@ -150,24 +225,22 @@ def process_chunk(data_chunk, index_name):
         for attempt in range(MAX_RETRIES):
             try:
                 # Perform bulk indexing and check if documents are indexed successfully
-                successful, failed = 0, 0
-                for ok, response in helpers.streaming_bulk(client=es, actions=actions, chunk_size=INT_CHUNK_SIZE):
-                    if ok:
-                        successful += 1
-                    else:
+                failed = 0
+                for ok, response in helpers.streaming_bulk(client=es_client, actions=actions, chunk_size=INT_CHUNK_SIZE):
+                    if not ok:
                         failed += 1
-                        # Log the failed document for debugging
-                        logging.error(f"Failed to index document: {response}")
+                        # Log only the error message (not the full response object)
+                        error_message = response.get('error', {}).get(
+                            'reason', 'Unknown error')
+                        logging.error(
+                            f"Failed to index document: {error_message}")
 
                 # If some documents failed, log a detailed message
                 if failed > 0:
                     logging.error(
                         f"{failed} document(s) failed to index in this chunk.")
-                else:
-                    logging.info(
-                        f"Successfully indexed {successful} documents in this chunk.")
 
-                # Exit the loop if indexing was successful
+                # Exit the loop if indexing was successful (no failed documents)
                 if failed == 0:
                     break
             except Exception as e:
