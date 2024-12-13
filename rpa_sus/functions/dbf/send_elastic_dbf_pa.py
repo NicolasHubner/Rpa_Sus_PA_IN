@@ -1,10 +1,7 @@
-import base64
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from datetime import datetime
 import datetime
-import json
 from dbfread import DBF
-from elastic_transport import NodeConfig, Transport
 from elasticsearch import Elasticsearch, helpers
 import logging
 import os
@@ -202,21 +199,19 @@ def process_chunk(data_chunk, index_name):
             for record in data_chunk if record
         )
 
-        # Log the data being sent to Elasticsearch
-        # Convert the generator to a list to log it
-        data_to_send = list(actions)
-
         record_count = 0  # Counter to track the number of records processed
+        failed_documents = 0  # Track the number of failed documents
 
         # Attempting bulk indexing with retries
         for attempt in range(MAX_RETRIES):
             try:
                 # Perform bulk indexing and check if documents are indexed successfully
-                failed = 0
-                for ok, response in helpers.streaming_bulk(client=es_client, actions=data_to_send, chunk_size=INT_CHUNK_SIZE):
+                for ok, response in helpers.streaming_bulk(
+                    client=es_client, actions=actions, chunk_size=INT_CHUNK_SIZE
+                ):
                     if not ok:
-                        failed += 1
-                        # Log only the error message (not the full response object)
+                        failed_documents += 1
+                        # Log the error but avoid printing entire response, log only the error reason
                         error_message = response.get('error', {}).get(
                             'reason', 'Unknown error')
                         logging.error(
@@ -224,23 +219,23 @@ def process_chunk(data_chunk, index_name):
                     else:
                         record_count += 1  # Increment counter for each successful record
 
-                # If some documents failed, log a detailed message
-                if failed > 0:
-                    logging.error(
-                        f"{failed} document(s) failed to index in this chunk.")
-
-                # Exit the loop if indexing was successful (no failed documents)
-                if failed == 0:
+                # If no documents failed, exit the loop
+                if failed_documents == 0:
                     break
             except Exception as e:
                 # Log the error and retry if necessary
                 logging.error(
                     f"Error during bulk indexing to {index_name} (attempt {attempt + 1}/{MAX_RETRIES}): {str(e)}")
-                time.sleep(RETRY_DELAY)
+                # Exponential backoff for retry
+                time.sleep(RETRY_DELAY * (2 ** attempt))
         else:
             # If all attempts fail, log the failure
             logging.error(
                 f"Failed to index chunk after {MAX_RETRIES} attempts.")
+
+        if failed_documents > 0:
+            logging.error(
+                f"{failed_documents} document(s) failed to index in total.")
 
         return record_count  # Return the count of processed records in this chunk
 
@@ -256,39 +251,41 @@ def parallel_bulk_index(dbf_directory):
     logging.info("Starting parallel indexing process.")
 
     dbf_files = [f for f in os.listdir(dbf_directory) if f.endswith('.dbf')]
-    tasks = []
-    total_records_processed = 0  # Initialize counter for total records processed
 
+    # Create a list to keep track of futures
+    futures = []
+
+    # Use ProcessPoolExecutor for parallel processing
     with ProcessPoolExecutor(max_workers=NUM_PROCESSES) as executor:
         for dbf_file in dbf_files:
             index_name = f"{ES_INDEX_NAME_PREFIX}{os.path.splitext(dbf_file)[0]}".lower(
             ).replace(" ", "_").replace("-", "_")
             dbf_file_path = os.path.join(dbf_directory, dbf_file)
+
             # Create the index if it doesn't exist
             ensure_index_exists(index_name)
             try:
                 logging.info(f"Reading DBF file: {dbf_file}")
+                # Submit tasks for each chunk and store the futures
                 for data_chunk in read_in_batches(dbf_file_path, INT_CHUNK_SIZE):
-                    # Submit the task and get the result (the number of records processed)
                     future = executor.submit(
                         process_chunk, data_chunk, index_name)
-                    total_records_processed += future.result()  # Aggregate the count
+                    futures.append(future)  # Append the future to the list
             except Exception as e:
                 logging.error(f"Failed to read DBF file {dbf_file}: {str(e)}")
 
-        for future in as_completed(tasks):
-            try:
-                future.result()  # Will raise an exception if one occurred in `process_chunk`
-            except Exception as exc:
-                logging.error(f"An error occurred: {exc}")
+    # Wait for all futures to complete and handle any potential exceptions
+    for future in as_completed(futures):
+        try:
+            future.result()  # Will raise an exception if one occurred during processing
+        except Exception as exc:
+            logging.error(f"An error occurred during chunk processing: {exc}")
 
     elapsed_time = time.time() - start_time
     elapsed_minutes = elapsed_time // 60
     elapsed_seconds = elapsed_time % 60
     logging.info(
         f"Data extraction and indexing took: {int(elapsed_minutes)} minutes and {elapsed_seconds:.2f} seconds.")
-    # Print the total count
-    logging.info(f"Total records processed: {total_records_processed}")
 
 
 # Start the parallel indexing process
