@@ -19,69 +19,6 @@ dbf_directory = './data/pa_acre'  # Specify the directory containing DBF files
 
 # dbf_directory = '/mnt/volume_nyc1_01/nicolas/alagoas/PA_ACIMA_2008'
 
-
-def debug_sniff_callback(transport, options):
-    """Enhanced debugging for sniff callback with explicit authentication"""
-    try:
-        print("Attempting to sniff nodes...")
-
-        # Use the same authentication method as the main connection
-        response = transport.perform_request(
-            "GET",
-            "/_nodes/http",
-            # Explicitly pass authentication
-            headers={
-                "Authorization": f"Basic {base64.b64encode(f'{ELASTIC_USERNAME}:{ELASTIC_PASSWORD}'.encode()).decode()}"
-            }
-        )
-
-        print("Raw Response:", response)
-
-        # Ensure response has body attribute or is a dictionary
-        body = response.body if hasattr(response, 'body') else response
-
-        if "nodes" not in body:
-            print("Warning: 'nodes' key not found in response")
-            return []
-
-        sniffed_nodes = []
-        for node_id, node_info in body["nodes"].items():
-            try:
-                # More robust parsing of publish address
-                publish_address = node_info["http"]["publish_address"]
-                # Handle different possible formats of publish address
-                if ':' in publish_address:
-                    host, port = publish_address.split(":")
-                else:
-                    host, port = publish_address, "9200"
-
-                node = NodeConfig(
-                    host=host.strip('[]'),  # Remove square brackets for IPv6
-                    port=int(port),
-                    scheme="http" if not node_info.get(
-                        "https", {}).get("enabled") else "https"
-                )
-                sniffed_nodes.append(node)
-                print(f"Discovered node: {node}")
-            except Exception as node_error:
-                print(f"Error processing node {node_id}: {node_error}")
-
-        return sniffed_nodes
-
-    except Exception as e:
-        print(f"Sniff callback failed: {e}")
-        return []
-
-
-# Node configurations with error handling
-node_configs = [
-    NodeConfig(
-        host="localhost",
-        port=9200,
-        scheme="http",
-    )
-]
-
 # Create Elasticsearch client with comprehensive error handling
 try:
     es_client = Elasticsearch(
@@ -123,43 +60,75 @@ def handle_date_conversion(date_value):
         return None
 
 
+def clean_column_data(record):
+    """Clean and preprocess the columns in the record before manipulation."""
+    cleaned_record = {}
+
+    for key, value in record.items():
+        if value is None:
+            # Or assign a default value like "" or 0 if preferred
+            cleaned_record[key] = None
+            continue
+
+        # Ensure all values are strings, trimming whitespaces
+        if isinstance(value, str):
+            cleaned_value = value.strip()  # Remove leading/trailing whitespaces
+        else:
+            cleaned_value = value
+
+        # Add further transformations if needed, for example:
+        # - Clean date format, currency formatting, etc.
+        # - Normalize text data, e.g., make all text lowercase if required
+        # - Remove unwanted characters or standardize codes
+
+        cleaned_record[key] = cleaned_value
+
+    return cleaned_record
+
+
 def prepare_es_doc(record, index_name, fields_to_include=COLUMNS_TO_WATCH):
-    # Filter record to include only specified fields
+    """Prepare a document for Elasticsearch by cleaning and transforming data."""
+    # Step 1: Clean the record by preprocessing columns
+    cleaned_record = clean_column_data(record)
+
+    # Step 2: Filter the record to include only specified fields (optional)
     if fields_to_include:
-        record = {k: v for k, v in record.items() if k in fields_to_include}
+        cleaned_record = {
+            k: v for k, v in cleaned_record.items() if k in fields_to_include}
 
-    # Handle PA_UFMUN conversion
-    uf_code = str(record.get("PA_UFMUN", ""))[:2]
-    record["PA_UFMUN"] = get_mapped_value(uf_code, code_to_state)
+    # Step 3: Handle PA_UFMUN conversion
+    uf_code = str(cleaned_record.get("PA_UFMUN", ""))[:2]
+    cleaned_record["PA_UFMUN"] = get_mapped_value(uf_code, code_to_state)
 
-    # # Handle PA_CMP conversion to yyyyMM format
-    # pa_cmp = record.get("PA_CMP", "")
-    # if pa_cmp:
-    #     record["PA_CMP"] = handle_date_conversion(pa_cmp)
-    #     if record["PA_CMP"]:
-    #         record["@timestamp"] = record["PA_CMP"]
+    # Step 4: Handle PA_CMP conversion to yyyyMM format
+    pa_cmp = cleaned_record.get("PA_CMP", "")
+    if pa_cmp:
+        cleaned_record["PA_CMP"] = handle_date_conversion(pa_cmp)
+        if cleaned_record["PA_CMP"]:
+            cleaned_record["@timestamp"] = cleaned_record["PA_CMP"]
 
-    # # Handle PA_TPFIN conversion to financial code
-    # pa_tpfin = record.get("PA_TPFIN", "")
-    # if pa_tpfin:
-    #     record["PA_TPFIN"] = get_mapped_value(pa_tpfin, financ_codes_to_name)
+    # Step 5: Handle PA_TPFIN conversion to financial code
+    pa_tpfin = cleaned_record.get("PA_TPFIN", "")
+    if pa_tpfin:
+        cleaned_record["PA_TPFIN"] = get_mapped_value(
+            pa_tpfin, financ_codes_to_name)
 
-    # # Handle PA_SUBFIN conversion to faectp code (with validation for integer type)
-    # pa_subfin = record.get("PA_SUBFIN", "")
-    # if pa_subfin:
-    #     pa_subfin = pa_subfin.lstrip('0')
-    #     record["PA_SUBFIN"] = get_mapped_value(pa_subfin, FAECTP_CODES)
+    # Step 6: Handle PA_SUBFIN conversion to faectp code
+    pa_subfin = cleaned_record.get("PA_SUBFIN", "")
+    if pa_subfin:
+        pa_subfin = pa_subfin.lstrip('0')
+        cleaned_record["PA_SUBFIN"] = get_mapped_value(pa_subfin, FAECTP_CODES)
 
-    # # Handle PA_CARATEND conversion to caratend code
-    # pa_caratend = record.get("PA_CATEND", "")
-    # if pa_caratend:
-    #     record["PA_CATEND"] = get_mapped_value(
-    #         pa_caratend, CARATEND_CODES)
+    # Step 7: Handle PA_CARATEND conversion to caratend code
+    pa_caratend = cleaned_record.get("PA_CATEND", "")
+    if pa_caratend:
+        cleaned_record["PA_CATEND"] = get_mapped_value(
+            pa_caratend, CARATEND_CODES)
 
-    # Prepare the final document
+    # Step 8: Prepare the final document for Elasticsearch
     return {
         '_index': index_name,
-        '_source': {k: str(v) if v is not None else None for k, v in record.items()},
+        '_source': {k: str(v) if v is not None else None for k, v in cleaned_record.items()},
     }
 
 
@@ -193,24 +162,36 @@ def ensure_index_exists(index_name: str):
         )
 
 
-def read_in_batches(file_path, chunk_size):
-    """Generator that yields chunks of records from the DBF table."""
-    table = DBF(file_path, encoding='latin-1', ignore_missing_memofile=True)
-    batch = []
-    for record in table:
-        batch.append(record)
-        if len(batch) == chunk_size:
-            yield batch
-            batch = []  # Clear the batch after yielding
-    if batch:  # Yield any remaining records in the final batch
-        yield batch
+def read_in_batches(dbf_file_path, batch_size):
+    """Read the DBF file in batches and count the records."""
+    record_count = 0  # Initialize a counter for the records processed
+    try:
+        # Open the DBF file and pass the file path to DBF
+        reader = DBF(dbf_file_path)  # Pass the file path directly to DBF
+        data_batch = []
+        for record in reader:
+            data_batch.append(record)
+            record_count += 1  # Increment the counter for each record processed
+            if len(data_batch) == batch_size:
+                yield data_batch
+                data_batch = []
+
+        # If there are any remaining records in the final batch, yield them
+        if data_batch:
+            yield data_batch
+
+        # Log the total number of records processed
+        logging.info(
+            f"Total records processed from {dbf_file_path}: {record_count}")
+
+    except Exception as e:
+        logging.error(
+            f"ERROR - Failed to read DBF file {dbf_file_path}: {str(e)}")
+        raise
 
 
-def log_bulk_size(actions):
-    size_in_bytes = sum(len(json.dumps(action)) for action in actions)
-    print(f"Bulk request size: {size_in_bytes} bytes")
-
-# # Function to process a chunk of data and send it to Elasticsearch
+# Initialize global counter to track processed records
+processed_records_count = 0
 
 
 def process_chunk(data_chunk, index_name):
@@ -221,12 +202,18 @@ def process_chunk(data_chunk, index_name):
             for record in data_chunk if record
         )
 
+        # Log the data being sent to Elasticsearch
+        # Convert the generator to a list to log it
+        data_to_send = list(actions)
+
+        record_count = 0  # Counter to track the number of records processed
+
         # Attempting bulk indexing with retries
         for attempt in range(MAX_RETRIES):
             try:
                 # Perform bulk indexing and check if documents are indexed successfully
                 failed = 0
-                for ok, response in helpers.streaming_bulk(client=es_client, actions=actions, chunk_size=INT_CHUNK_SIZE):
+                for ok, response in helpers.streaming_bulk(client=es_client, actions=data_to_send, chunk_size=INT_CHUNK_SIZE):
                     if not ok:
                         failed += 1
                         # Log only the error message (not the full response object)
@@ -234,6 +221,8 @@ def process_chunk(data_chunk, index_name):
                             'reason', 'Unknown error')
                         logging.error(
                             f"Failed to index document: {error_message}")
+                    else:
+                        record_count += 1  # Increment counter for each successful record
 
                 # If some documents failed, log a detailed message
                 if failed > 0:
@@ -253,10 +242,13 @@ def process_chunk(data_chunk, index_name):
             logging.error(
                 f"Failed to index chunk after {MAX_RETRIES} attempts.")
 
+        return record_count  # Return the count of processed records in this chunk
+
     except Exception as e:
         # Catching and logging any exceptions during the chunk processing
         logging.error(
             f"Error processing chunk for index {index_name}: {str(e)}")
+        return 0  # If an error occurs, return 0 to ensure no records are counted
 
 
 def parallel_bulk_index(dbf_directory):
@@ -265,6 +257,7 @@ def parallel_bulk_index(dbf_directory):
 
     dbf_files = [f for f in os.listdir(dbf_directory) if f.endswith('.dbf')]
     tasks = []
+    total_records_processed = 0  # Initialize counter for total records processed
 
     with ProcessPoolExecutor(max_workers=NUM_PROCESSES) as executor:
         for dbf_file in dbf_files:
@@ -276,8 +269,10 @@ def parallel_bulk_index(dbf_directory):
             try:
                 logging.info(f"Reading DBF file: {dbf_file}")
                 for data_chunk in read_in_batches(dbf_file_path, INT_CHUNK_SIZE):
-                    tasks.append(executor.submit(
-                        process_chunk, data_chunk, index_name))
+                    # Submit the task and get the result (the number of records processed)
+                    future = executor.submit(
+                        process_chunk, data_chunk, index_name)
+                    total_records_processed += future.result()  # Aggregate the count
             except Exception as e:
                 logging.error(f"Failed to read DBF file {dbf_file}: {str(e)}")
 
@@ -288,11 +283,12 @@ def parallel_bulk_index(dbf_directory):
                 logging.error(f"An error occurred: {exc}")
 
     elapsed_time = time.time() - start_time
-
     elapsed_minutes = elapsed_time // 60
     elapsed_seconds = elapsed_time % 60
     logging.info(
         f"Data extraction and indexing took: {int(elapsed_minutes)} minutes and {elapsed_seconds:.2f} seconds.")
+    # Print the total count
+    logging.info(f"Total records processed: {total_records_processed}")
 
 
 # Start the parallel indexing process
