@@ -252,11 +252,8 @@ def parallel_bulk_index(dbf_directory):
 
     dbf_files = [f for f in os.listdir(dbf_directory) if f.endswith('.dbf')]
 
-    # Create a list to keep track of futures
-    futures = []
-
     # Use ProcessPoolExecutor for parallel processing
-    with ProcessPoolExecutor(max_workers=NUM_PROCESSES) as executor:
+    with ProcessPoolExecutor(max_workers=4) as executor:
         for dbf_file in dbf_files:
             index_name = f"{ES_INDEX_NAME_PREFIX}{os.path.splitext(dbf_file)[0]}".lower(
             ).replace(" ", "_").replace("-", "_")
@@ -266,20 +263,12 @@ def parallel_bulk_index(dbf_directory):
             ensure_index_exists(index_name)
             try:
                 logging.info(f"Reading DBF file: {dbf_file}")
-                # Submit tasks for each chunk and store the futures
+                # Process chunks in parallel
                 for data_chunk in read_in_batches(dbf_file_path, INT_CHUNK_SIZE):
-                    future = executor.submit(
-                        process_chunk, data_chunk, index_name)
-                    futures.append(future)  # Append the future to the list
+                    # Directly submit the chunk processing without storing futures
+                    executor.submit(process_chunk, data_chunk, index_name)
             except Exception as e:
                 logging.error(f"Failed to read DBF file {dbf_file}: {str(e)}")
-
-    # Wait for all futures to complete and handle any potential exceptions
-    for future in as_completed(futures):
-        try:
-            future.result()  # Will raise an exception if one occurred during processing
-        except Exception as exc:
-            logging.error(f"An error occurred during chunk processing: {exc}")
 
     elapsed_time = time.time() - start_time
     elapsed_minutes = elapsed_time // 60
