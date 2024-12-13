@@ -1,6 +1,7 @@
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from datetime import datetime
 import datetime
+from typing import Dict, List, Optional
 from dbfread import DBF
 from elasticsearch import Elasticsearch, helpers
 import logging
@@ -30,23 +31,18 @@ logging.basicConfig(level=logging.INFO,
 
 
 # Precomputed mapping for state codes
-state_code_to_name = {str(code).zfill(
-    2): name for name, code in state_codes.items()}
+code_to_state = {value: key for key, value in state_codes.items()}
 
 # # Precomputed mapping for financial codes
-financ_codes_to_name = {str(code): name for name, code in FINANC_CODES.items()}
-
-# # Precomputed mapping for faectp codes
-faectp_codes_to_name = {str(code): name for name, code in FAECTP_CODES.items()}
-
-# # Precomputed mapping for caratend codes
-caratend_codes_to_name = {
-    str(code): name for name, code in CARATEND_CODES.items()}
+financ_codes_to_name = {value: key for key, value in FINANC_CODES.items()}
 
 
 def get_mapped_value(code, mapping, default="Unknown"):
     """Helper function to get mapped value from a dictionary."""
-    return mapping.get(str(code), default)
+    try:
+        return mapping.get(int(code), default)
+    except ValueError:
+        return default
 
 
 def handle_date_conversion(date_value):
@@ -59,17 +55,13 @@ def handle_date_conversion(date_value):
 
 
 def prepare_es_doc(record, index_name, fields_to_include=COLUMNS_TO_WATCH):
-    # if fields_to_include:
-    #     record = {k: v for k, v in record.items() if k in fields_to_include}
-    # uf_code = str(record.get("PA_UFMUN", ""))[:2]
-    # record["PA_UFMUN"] = state_code_to_name.get(uf_code, "Unknown")
-    # # Filter record to include only specified fields
+    # Filter record to include only specified fields
     if fields_to_include:
         record = {k: v for k, v in record.items() if k in fields_to_include}
 
     # Handle PA_UFMUN conversion
     uf_code = str(record.get("PA_UFMUN", ""))[:2]
-    record["PA_UFMUN"] = get_mapped_value(uf_code, state_code_to_name)
+    record["PA_UFMUN"] = get_mapped_value(uf_code, code_to_state)
 
     # Handle PA_CMP conversion to yyyyMM format
     pa_cmp = record.get("PA_CMP", "")
@@ -83,16 +75,17 @@ def prepare_es_doc(record, index_name, fields_to_include=COLUMNS_TO_WATCH):
     if pa_tpfin:
         record["PA_TPFIN"] = get_mapped_value(pa_tpfin, financ_codes_to_name)
 
-    # Handle PA_SUBFIN conversion to faectp code
+    # Handle PA_SUBFIN conversion to faectp code (with validation for integer type)
     pa_subfin = record.get("PA_SUBFIN", "")
     if pa_subfin:
-        record["PA_SUBFIN"] = get_mapped_value(pa_subfin, faectp_codes_to_name)
+        pa_subfin = pa_subfin.lstrip('0')
+        record["PA_SUBFIN"] = get_mapped_value(pa_subfin, FAECTP_CODES)
 
     # Handle PA_CARATEND conversion to caratend code
-    pa_caratend = record.get("PA_CARATEND", "")
+    pa_caratend = record.get("PA_CATEND", "")
     if pa_caratend:
-        record["PA_CARATEND"] = get_mapped_value(
-            pa_caratend, caratend_codes_to_name)
+        record["PA_CATEND"] = get_mapped_value(
+            pa_caratend, CARATEND_CODES)
 
     # Prepare the final document
     return {
@@ -101,30 +94,34 @@ def prepare_es_doc(record, index_name, fields_to_include=COLUMNS_TO_WATCH):
     }
 
 
-def ensure_index_exists(index_name):
+def ensure_index_exists(index_name: str):
+    # Check if the index exists and create it if not
     if not es.indices.exists(index=index_name):
-        es.indices.create(index=index_name, body={
-            "mappings": {
-                "properties": {
-                    "PA_CODUNI": {"type": "keyword"},
-                    "PA_UFMUN": {"type": "keyword"},
-                    "PA_CNPJCPF": {"type": "keyword"},
-                    "PA_CNPJMNT": {"type": "keyword"},
-                    "PA_CMP": {"type": "keyword"},
-                    "PA_PROC_ID": {"type": "integer"},
-                    "PA_TPFIN": {"type": "keyword"},
-                    "PA_SUBFIN": {"type": "integer"},
-                    "PA_AUTORIZ": {"type": "keyword"},
-                    "PA_CIDPRI": {"type": "keyword"},
-                    "PA_CIDSEC": {"type": "keyword"},
-                    "PA_CATEND": {"type": "keyword"},
-                    "PA_QTDPRO": {"type": "integer"},
-                    "PA_QTDAPR": {"type": "integer"},
-                    "PA_VALPRO": {"type": "float"},
-                    "PA_VALAPR": {"type": "float"},
+        es.indices.create(
+            index=index_name,
+            body={
+                "mappings": {
+                    "properties": {
+                        "PA_CODUNI": {"type": "keyword"},
+                        "PA_UFMUN": {"type": "keyword"},
+                        "PA_CNPJCPF": {"type": "keyword"},
+                        "PA_CNPJMNT": {"type": "keyword"},
+                        "PA_CMP": {"type": "keyword"},
+                        "PA_PROC_ID": {"type": "integer"},
+                        "PA_TPFIN": {"type": "keyword"},
+                        "PA_SUBFIN": {"type": "keyword"},
+                        "PA_AUTORIZ": {"type": "keyword"},
+                        "PA_CIDPRI": {"type": "keyword"},
+                        "PA_CIDSEC": {"type": "keyword"},
+                        "PA_CATEND": {"type": "keyword"},
+                        "PA_QTDPRO": {"type": "integer"},
+                        "PA_QTDAPR": {"type": "integer"},
+                        "PA_VALPRO": {"type": "float"},
+                        "PA_VALAPR": {"type": "float"},
+                    }
                 }
             }
-        })
+        )
 
 
 def read_in_batches(file_path, chunk_size):
@@ -142,25 +139,49 @@ def read_in_batches(file_path, chunk_size):
 
 # # Function to process a chunk of data and send it to Elasticsearch
 def process_chunk(data_chunk, index_name):
+    """Process a chunk of data and send it to Elasticsearch."""
     try:
+        actions = (
+            prepare_es_doc(record, index_name)
+            for record in data_chunk if record
+        )
 
-        actions = (prepare_es_doc(record, index_name)
-                   for record in data_chunk if record)
-
+        # Attempting bulk indexing with retries
         for attempt in range(MAX_RETRIES):
             try:
-                for ok, _ in helpers.streaming_bulk(client=es, actions=actions, chunk_size=INT_CHUNK_SIZE):
-                    if not ok:
-                        logging.error("A document failed to index.")
-                break
+                # Perform bulk indexing and check if documents are indexed successfully
+                successful, failed = 0, 0
+                for ok, response in helpers.streaming_bulk(client=es, actions=actions, chunk_size=INT_CHUNK_SIZE):
+                    if ok:
+                        successful += 1
+                    else:
+                        failed += 1
+                        # Log the failed document for debugging
+                        logging.error(f"Failed to index document: {response}")
+
+                # If some documents failed, log a detailed message
+                if failed > 0:
+                    logging.error(
+                        f"{failed} document(s) failed to index in this chunk.")
+                else:
+                    logging.info(
+                        f"Successfully indexed {successful} documents in this chunk.")
+
+                # Exit the loop if indexing was successful
+                if failed == 0:
+                    break
             except Exception as e:
+                # Log the error and retry if necessary
                 logging.error(
                     f"Error during bulk indexing to {index_name} (attempt {attempt + 1}/{MAX_RETRIES}): {str(e)}")
                 time.sleep(RETRY_DELAY)
         else:
+            # If all attempts fail, log the failure
             logging.error(
                 f"Failed to index chunk after {MAX_RETRIES} attempts.")
+
     except Exception as e:
+        # Catching and logging any exceptions during the chunk processing
         logging.error(
             f"Error processing chunk for index {index_name}: {str(e)}")
 

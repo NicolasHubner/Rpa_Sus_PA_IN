@@ -148,6 +148,17 @@ FAECTP_CODES = {
     86: "Gestão do SUS",
 }
 
+
+def get_mapped_value(code, mapping, default="Unknown"):
+    """Helper function to get mapped value from a dictionary."""
+    try:
+        return mapping.get(int(code), default)
+    except ValueError:
+        return default
+
+
+print('pa_subfin', get_mapped_value('1', FAECTP_CODES))
+
 CARATEND_CODES = {
     1: "Eletivo",
     2: "Urgência",
