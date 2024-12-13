@@ -7,7 +7,9 @@ services:
       - discovery.type=single-node
       - xpack.security.http.ssl.enabled=false
       - xpack.license.self_generated.type=trial
+      - http.max_initial_line_length=248k
       - ES_JAVA_OPTS=-Xms8g -Xmx8g  # Allocate 8GB of heap memory for Elasticsearch
+      - http.max_content_length=200mb  # Set max content length to 200 MB
     networks:
       - elastic-net
     ports:
