@@ -97,30 +97,30 @@ def prepare_es_doc(record, index_name, fields_to_include=COLUMNS_TO_WATCH):
     uf_code = str(cleaned_record.get("PA_UFMUN", ""))[:2]
     cleaned_record["PA_UFMUN"] = get_mapped_value(uf_code, code_to_state)
 
-    # Step 4: Handle PA_CMP conversion to yyyyMM format
-    pa_cmp = cleaned_record.get("PA_CMP", "")
-    if pa_cmp:
-        cleaned_record["PA_CMP"] = handle_date_conversion(pa_cmp)
-        if cleaned_record["PA_CMP"]:
-            cleaned_record["@timestamp"] = cleaned_record["PA_CMP"]
+    # # Step 4: Handle PA_CMP conversion to yyyyMM format
+    # pa_cmp = cleaned_record.get("PA_CMP", "")
+    # if pa_cmp:
+    #     cleaned_record["PA_CMP"] = handle_date_conversion(pa_cmp)
+    #     if cleaned_record["PA_CMP"]:
+    #         cleaned_record["@timestamp"] = cleaned_record["PA_CMP"]
 
-    # Step 5: Handle PA_TPFIN conversion to financial code
-    pa_tpfin = cleaned_record.get("PA_TPFIN", "")
-    if pa_tpfin:
-        cleaned_record["PA_TPFIN"] = get_mapped_value(
-            pa_tpfin, financ_codes_to_name)
+    # # Step 5: Handle PA_TPFIN conversion to financial code
+    # pa_tpfin = cleaned_record.get("PA_TPFIN", "")
+    # if pa_tpfin:
+    #     cleaned_record["PA_TPFIN"] = get_mapped_value(
+    #         pa_tpfin, financ_codes_to_name)
 
-    # Step 6: Handle PA_SUBFIN conversion to faectp code
-    pa_subfin = cleaned_record.get("PA_SUBFIN", "")
-    if pa_subfin:
-        pa_subfin = pa_subfin.lstrip('0')
-        cleaned_record["PA_SUBFIN"] = get_mapped_value(pa_subfin, FAECTP_CODES)
+    # # Step 6: Handle PA_SUBFIN conversion to faectp code
+    # pa_subfin = cleaned_record.get("PA_SUBFIN", "")
+    # if pa_subfin:
+    #     pa_subfin = pa_subfin.lstrip('0')
+    #     cleaned_record["PA_SUBFIN"] = get_mapped_value(pa_subfin, FAECTP_CODES)
 
-    # Step 7: Handle PA_CARATEND conversion to caratend code
-    pa_caratend = cleaned_record.get("PA_CATEND", "")
-    if pa_caratend:
-        cleaned_record["PA_CATEND"] = get_mapped_value(
-            pa_caratend, CARATEND_CODES)
+    # # Step 7: Handle PA_CARATEND conversion to caratend code
+    # pa_caratend = cleaned_record.get("PA_CATEND", "")
+    # if pa_caratend:
+    #     cleaned_record["PA_CATEND"] = get_mapped_value(
+    #         pa_caratend, CARATEND_CODES)
 
     # Step 8: Prepare the final document for Elasticsearch
     return {
