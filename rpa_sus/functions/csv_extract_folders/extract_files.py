@@ -2,10 +2,10 @@ import os
 import zipfile
 
 # Define the main directory containing the subfolders
-main_folder = '/home/nicolas/Downloads/DataFlavio/Para'
-extract_folder = '/home/nicolas/Downloads/DataFlavio/Para'
+main_folder = '/mnt/volume_nyc1_01/nicolas/Sao_Paulo'
+extract_folder = '/mnt/volume_nyc1_01/nicolas/Sao_Paulo'
 
-name_state = "para"
+name_state = "sao_paulo"
 
 # Create the destination folder if it doesn't exist
 os.makedirs(extract_folder, exist_ok=True)
