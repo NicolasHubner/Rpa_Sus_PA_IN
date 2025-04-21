@@ -15,7 +15,7 @@ from configs.constants import CARATEND_CODES, COLUMNS_TO_WATCH, state_codes, FIN
 # DBF directory path
 # dbf_directory = './data/pa_acre'  # Specify the directory containing DBF files
 
-dbf_directory = '/mnt/volume_nyc1_01/nicolas/alagoas/PA_ACIMA_2008'
+dbf_directory = '/mnt/volume_nyc1_01/nicolas/Mato_Grosso'
 
 # Create Elasticsearch client with comprehensive error handling
 try:
