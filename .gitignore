@@ -3,3 +3,5 @@ dsx
 health.py
 
 rpa_sus/configs/__pycache__/
+rpa_sus/functions/__pycache__/
+rpa_sus/functions/csv_extract_folders/__pycache__/

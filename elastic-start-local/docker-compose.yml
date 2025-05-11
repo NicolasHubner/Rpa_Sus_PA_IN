@@ -8,17 +8,17 @@ services:
       - xpack.security.http.ssl.enabled=false
       - xpack.license.self_generated.type=trial
       - http.max_initial_line_length=248k
-      - ES_JAVA_OPTS=-Xms8g -Xmx8g  # Allocate 8GB of heap memory for Elasticsearch
-      - http.max_content_length=200mb  # Set max content length to 200 MB
+      - ES_JAVA_OPTS=-Xms8g -Xmx8g # Allocate 8GB of heap memory for Elasticsearch
+      - http.max_content_length=200mb # Set max content length to 200 MB
     networks:
       - elastic-net
     ports:
-      - "9200:9200"  # Expose Elasticsearch on port 9200
-    volumes:
-      - elasticsearch_data:/usr/share/elasticsearch/data  # Persist Elasticsearch data
+      - "9200:9200" # Expose Elasticsearch on port 9200
+    # volumes:
+    #   - elasticsearch_data:/usr/share/elasticsearch/data  # Persist Elasticsearch data
     deploy:
       restart_policy:
-        condition: on-failure  # Restart container on failure
+        condition: on-failure # Restart container on failure
         delay: 5s
         max_attempts: 3
         window: 120s
@@ -36,14 +36,14 @@ services:
     networks:
       - elastic-net
     ports:
-      - "5601:5601"  # Expose Kibana on port 5601
+      - "5601:5601" # Expose Kibana on port 5601
     depends_on:
       elasticsearch:
-        condition: service_started  # Kibana will wait for Elasticsearch to start
+        condition: service_started # Kibana will wait for Elasticsearch to start
 
-volumes:
-  elasticsearch_data:  # Persistent volume for Elasticsearch data
+# volumes:
+#   elasticsearch_data:  # Persistent volume for Elasticsearch data
 
 networks:
   elastic-net:
-    external: true  # Use an existing network
+    external: true # Use an existing network
