@@ -1,34 +1,78 @@
-from concurrent.futures import ProcessPoolExecutor, as_completed
-from datetime import datetime
-import datetime
-from http.client import LineTooLong
-from dbfread import DBF
-from elasticsearch import Elasticsearch, helpers
-import logging
+# fmt: off
+import sys
 import os
+import traceback
+
+# Add the project root directory to Python path
+project_root = os.path.abspath(os.path.join(
+    os.path.dirname(__file__), '..', '..', '..', '..'))
+sys.path.insert(0, project_root)
+
 import time
+import logging
+from elasticsearch import Elasticsearch, helpers, exceptions
+from http.client import LineTooLong
+import datetime
+from datetime import datetime
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
-from configs.database import ELASTICSEARCH_HOST, ES_INDEX_NAME_PREFIX, CHUNK_SIZE, MAX_RETRIES, RETRY_DELAY, NUM_PROCESSES, ELASTIC_USERNAME, ELASTIC_PASSWORD
-from configs.constants import CARATEND_CODES, COLUMNS_TO_WATCH, state_codes, FINANC_CODES, FAECTP_CODES
+from rpa_sus.configs.database import ELASTICSEARCH_HOST, ES_INDEX_NAME_PREFIX, MAX_RETRIES, RETRY_DELAY, NUM_PROCESSES, ELASTIC_USERNAME, ELASTIC_PASSWORD
+from rpa_sus.configs.constants import state_codes
+from rpa_sus.functions.dbf.common import read_in_batches
+from rpa_sus.functions.dbf.common.clean_data_record import clean_column_data
+# fmt: on
 
 
-# DBF directory path
+COLUNS_TO_WATCH_92_97 = [
+    "UF_ZI",
+    "ANO_CMPT",
+    "MES_CMPT",
+    "ESPEC",
+    "CGC_HOSP",
+    "N_AIH",
+    "IDENT",
+    "UTI_TOTAL",
+    "PROC_REA",
+    "VAL_SH",
+    "VAL_SP",
+    "VAL_SADT",
+    "VAL_TOT",
+    "DT_INTER",
+    "DT_SAIDA",
+    "DIAG_PRINC",
+    "COBRANCA",
+    "NATUREZA",
+    "MUNIC_MOV",
+    "DIAS_PERM",
+]
+
+INT_CHUNK_SIZE = 3000  # Adjust the chunk size for bulk indexing
+
 # dbf_directory = './data/pa_acre'  # Specify the directory containing DBF files
 
-dbf_directory = '/mnt/volume_nyc1_01/nicolas/Mato_Grosso'
+
+dbf_directory = '/home/nicolas/FreeLancers/FlavioProject/rpa_sus/data'
 
 # Create Elasticsearch client with comprehensive error handling
 try:
     es_client = Elasticsearch(
-        [ELASTICSEARCH_HOST],
-        basic_auth=(ELASTIC_USERNAME, ELASTIC_PASSWORD),
-        max_retries=MAX_RETRIES,
+        ["http://localhost:9200"],
+        basic_auth=('elastic', 'NICOLAS123@@@'),
+        api_key=None,
+        verify_certs=False,
     ).options(request_timeout=60)
+
+    # Check if the connection is successful
+    indices_status = es_client.cat.indices(format="json")
+    print("Indices Status:", indices_status)
+
 except Exception as connection_error:
-    print(f"Elasticsearch connection failed: {connection_error}")
+    logging.error(f"Elasticsearch connection failed: {connection_error}")
+    logging.error(f"Traceback: {traceback.format_exc()}")
+    sys.exit(1)
 
 
-INT_CHUNK_SIZE = int(CHUNK_SIZE)
+INT_CHUNK_SIZE = int(INT_CHUNK_SIZE)
 
 # Logging setup
 logging.basicConfig(level=logging.INFO,
@@ -37,9 +81,6 @@ logging.basicConfig(level=logging.INFO,
 
 # Precomputed mapping for state codes
 code_to_state = {value: key for key, value in state_codes.items()}
-
-# # Precomputed mapping for financial codes
-financ_codes_to_name = {value: key for key, value in FINANC_CODES.items()}
 
 
 def get_mapped_value(code, mapping, default="Unknown"):
@@ -59,70 +100,52 @@ def handle_date_conversion(date_value):
         return None
 
 
-def clean_column_data(record):
-    """Clean and preprocess the columns in the record before manipulation."""
-    cleaned_record = {}
+def handle_data_conversion_92_97(ANO, MES):
+    """Handle data conversion for PA_CMP files."""
+    # Step 5: Handle PA_CMP conversion to datetime format
+    try:
+        ano_cmpt = int(ANO)
+        mes_cmpt = int(MES)
 
-    for key, value in record.items():
-        if value is None:
-            # Or assign a default value like "" or 0 if preferred
-            cleaned_record[key] = None
-            continue
-
-        # Ensure all values are strings, trimming whitespaces
-        if isinstance(value, str):
-            cleaned_value = value.strip()  # Remove leading/trailing whitespaces
+        # Ensure the month is valid (1-12)
+        if 1 <= mes_cmpt <= 12:
+            # Create a datetime object for the first day of the given year and month
+            date_value = datetime(ano_cmpt, mes_cmpt, 1)
+            return date_value
         else:
-            cleaned_value = value
-
-        # Add further transformations if needed, for example:
-        # - Clean date format, currency formatting, etc.
-        # - Normalize text data, e.g., make all text lowercase if required
-        # - Remove unwanted characters or standardize codes
-
-        cleaned_record[key] = cleaned_value
-
-    return cleaned_record
+            return None
+    except ValueError:
+        # If conversion fails, return None
+        return None
 
 
-def prepare_es_doc(record, index_name, fields_to_include=COLUMNS_TO_WATCH):
+def prepare_es_doc(record, index_name, fields_to_include=COLUNS_TO_WATCH_92_97):
     """Prepare a document for Elasticsearch by cleaning and transforming data."""
     # Step 1: Clean the record by preprocessing columns
     cleaned_record = clean_column_data(record)
 
+    # # Step 3: Handle UF_ZI conversion
+    # cleaned_record["UF_ZI"] = get_mapped_value(
+    #     cleaned_record["UF_ZI"], code_to_state)
+
     # Step 2: Filter the record to include only specified fields (optional)
-    if fields_to_include:
-        cleaned_record = {
-            k: v for k, v in cleaned_record.items() if k in fields_to_include}
+    # if fields_to_include:
+    #     cleaned_record = {
+    #         k: v for k, v in cleaned_record.items() if k in fields_to_include}
 
-    # Step 3: Handle PA_UFMUN conversion
-    uf_code = str(cleaned_record.get("PA_UFMUN", ""))[:2]
-    cleaned_record["PA_UFMUN"] = get_mapped_value(uf_code, code_to_state)
-
-    # # Step 4: Handle PA_CMP conversion to yyyyMM format
-    pa_cmp = cleaned_record.get("PA_CMP", "")
-    if pa_cmp:
-        cleaned_record["PA_CMP"] = handle_date_conversion(pa_cmp)
-        if cleaned_record["PA_CMP"]:
-            cleaned_record["@timestamp"] = cleaned_record["PA_CMP"]
-
-    # Step 5: Handle PA_TPFIN conversion to financial code
-    pa_tpfin = cleaned_record.get("PA_TPFIN", "")
-    if pa_tpfin:
-        cleaned_record["PA_TPFIN"] = get_mapped_value(
-            pa_tpfin, financ_codes_to_name)
-
-    # Step 6: Handle PA_SUBFIN conversion to faectp code
-    pa_subfin = cleaned_record.get("PA_SUBFIN", "")
-    if pa_subfin:
-        pa_subfin = pa_subfin.lstrip('0')
-        cleaned_record["PA_SUBFIN"] = get_mapped_value(pa_subfin, FAECTP_CODES)
-
-    # Step 7: Handle PA_CARATEND conversion to caratend code
-    pa_caratend = cleaned_record.get("PA_CATEND", "")
-    if pa_caratend:
-        cleaned_record["PA_CATEND"] = get_mapped_value(
-            pa_caratend, CARATEND_CODES)
+    # # # Step 4: Handle PA_CMP conversion to yyyyMM format
+    # ano_cmpt = cleaned_record.get("ANO_CMPT", "")
+    # mes_cmpt = cleaned_record.get("MES_CMPT", "")
+    # if ano_cmpt and mes_cmpt:
+    #     date_value = handle_data_conversion_92_97(ano_cmpt, mes_cmpt)
+    #     if date_value:
+    #         # Use the datetime value
+    #         formatted_date = date_value.strftime(
+    #             "%Y-%m-%d")  # Format as needed
+    #     else:
+    #         # Handle the case where conversion wasn't possible
+    #         formatted_date = None
+    #     cleaned_record["@DATA"] = formatted_date  # Update the field
 
     # Step 8: Prepare the final document for Elasticsearch
     return {
@@ -132,60 +155,63 @@ def prepare_es_doc(record, index_name, fields_to_include=COLUMNS_TO_WATCH):
 
 
 def ensure_index_exists(index_name: str):
-    # Check if the index exists and create it if not
-    if not es_client.indices.exists(index=index_name):
-        es_client.indices.create(
-            index=index_name,
-            body={
-                "mappings": {
-                    "properties": {
-                        "PA_CODUNI": {"type": "keyword"},
-                        "PA_UFMUN": {"type": "keyword"},
-                        "PA_CNPJCPF": {"type": "keyword"},
-                        "PA_CNPJMNT": {"type": "keyword"},
-                        "PA_CMP": {"type": "keyword"},
-                        "PA_PROC_ID": {"type": "integer"},
-                        "PA_TPFIN": {"type": "keyword"},
-                        "PA_SUBFIN": {"type": "keyword"},
-                        "PA_AUTORIZ": {"type": "keyword"},
-                        "PA_CIDPRI": {"type": "keyword"},
-                        "PA_CIDSEC": {"type": "keyword"},
-                        "PA_CATEND": {"type": "keyword"},
-                        "PA_QTDPRO": {"type": "integer"},
-                        "PA_QTDAPR": {"type": "integer"},
-                        "PA_VALPRO": {"type": "float"},
-                        "PA_VALAPR": {"type": "float"},
+    try:
+        # Check if the index exists
+        if not es_client.indices.exists(index=index_name):
+            # If it doesn't exist, try to create it
+            es_client.indices.create(
+                index=index_name,
+                body={
+                    "mappings": {
+                        "properties": {
+                            "UF_ZI": {"type": "keyword"},
+                            "ANO_CMPT": {"type": "keyword"},
+                            "MES_CMPT": {"type": "keyword"},
+                            "ESPEC": {"type": "keyword"},
+                            "CGC_HOSP": {"type": "keyword"},
+                            "N_AIH": {"type": "keyword"},
+                            "IDENT": {"type": "keyword"},
+                            "UTI_TOTAL": {"type": "integer"},
+                            "PROC_REA": {"type": "keyword"},
+                            "VAL_SH": {"type": "float"},
+                            "VAL_SP": {"type": "float"},
+                            "VAL_SADT": {"type": "float"},
+                            "VAL_TOT": {"type": "float"},
+                            "DT_INTER": {"type": "keyword"},
+                            "DT_SAIDA": {"type": "keyword"},
+                            "DIAG_PRINC": {"type": "keyword"},
+                            "COBRANCA": {"type": "keyword"},
+                            "NATUREZA": {"type": "keyword"},
+                            "MUNIC_MOV": {"type": "keyword"},
+                            "DIAS_PERM": {"type": "keyword"},
+                            "@DATA": {"type": "date"},
+                            "VAL_GERAL": {"type": "float"},
+                        }
                     }
                 }
-            }
-        )
-
-
-def read_in_batches(dbf_file_path, batch_size):
-    """Read the DBF file in batches and count the records."""
-    record_count = 0  # Initialize a counter for the records processed
-    try:
-        # Open the DBF file and pass the file path to DBF
-        reader = DBF(dbf_file_path)  # Pass the file path directly to DBF
-        data_batch = []
-        for record in reader:
-            data_batch.append(record)
-            record_count += 1  # Increment the counter for each record processed
-            if len(data_batch) == batch_size:
-                yield data_batch
-                data_batch = []
-
-        # If there are any remaining records in the final batch, yield them
-        if data_batch:
-            yield data_batch
-
-        # Log the total number of records processed
-        logging.info(
-            f"Total records processed from {dbf_file_path}: {record_count}")
-
+            )
+            logging.info(f"Index '{index_name}' created successfully.")
+        else:
+            logging.info(f"Index '{index_name}' already exists.")
+    except exceptions.ConnectionError as ce:
+        logging.error(f"Connection error while ensuring index exists: {ce}")
+        raise
+    except exceptions.RequestError as re:
+        logging.error(f"Request error while ensuring index exists: {re}")
+        logging.error(f"Error info: {re.info}")
+        logging.error(f"Error status: {re.status_code}")
+        if re.error == 'resource_already_exists_exception':
+            logging.info(f"Index '{index_name}' already exists.")
+        else:
+            raise
+    except exceptions.AuthenticationException as ae:
+        logging.error(f"Authentication error: {ae}")
+        raise
+    except exceptions.AuthorizationException as ae:
+        logging.error(f"Authorization error: {ae}")
+        raise
     except Exception as e:
-        logging.error(
-            f"ERROR - Failed to read DBF file {dbf_file_path}: {str(e)}")
+        logging.error(f"Unexpected error while ensuring index exists: {e}")
         raise
 
 
@@ -295,4 +321,4 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         logging.warning("Process interrupted by user.")
     except Exception as e:
-        logging.error(f"Unexpected error: {str(e)}")
+        logging.error(f"Unexpected error: {str(e)}", exc_info=True)
