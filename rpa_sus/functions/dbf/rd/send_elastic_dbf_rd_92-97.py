@@ -70,7 +70,7 @@ processed_records_count = 0
 MAX_BACKOFF = 60  # Maximum backoff time in seconds
 
 
-dbf_directory = '/home/nicolas/FreeLancers/FlavioProject/rpa_sus/data'
+dbf_directory = '-'
 
 # Create Elasticsearch client with comprehensive error handling
 try:
