@@ -1,24 +1,133 @@
 services:
-  elasticsearch:
+  es01:
     image: docker.elastic.co/elasticsearch/elasticsearch:8.15.0
-    container_name: elasticsearch
+    container_name: es01
     environment:
+      - node.name=es01
+      - cluster.name=es-cluster
+      - cluster.initial_master_nodes=es01,es02,es03
+      - discovery.seed_hosts=es02,es03
       - ELASTIC_PASSWORD=NICOLAS123@@@
-      - discovery.type=single-node
+      - bootstrap.memory_lock=true
+      - xpack.security.enabled=false
       - xpack.security.http.ssl.enabled=false
       - xpack.license.self_generated.type=trial
       - http.max_initial_line_length=248k
-      - ES_JAVA_OPTS=-Xms8g -Xmx8g # Allocate 8GB of heap memory for Elasticsearch
-      - http.max_content_length=200mb # Set max content length to 200 MB
+      - ES_JAVA_OPTS=-Xms4g -Xmx4g
+      - http.max_content_length=200mb
+      - network.host=0.0.0.0
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    cap_add:
+      - IPC_LOCK
+    volumes:
+      - es01_data:/usr/share/elasticsearch/data
     networks:
       - elastic-net
     ports:
-      - "9200:9200" # Expose Elasticsearch on port 9200
-    # volumes:
-    #   - elasticsearch_data:/usr/share/elasticsearch/data  # Persist Elasticsearch data
+      - "9200:9200"
+      - "9300:9300"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:9200 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
     deploy:
       restart_policy:
-        condition: on-failure # Restart container on failure
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
+
+  es02:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.15.0
+    container_name: es02
+    environment:
+      - node.name=es02
+      - cluster.name=es-cluster
+      - cluster.initial_master_nodes=es01,es02,es03
+      - discovery.seed_hosts=es01,es03
+      - ELASTIC_PASSWORD=NICOLAS123@@@
+      - bootstrap.memory_lock=true
+      - xpack.security.enabled=false
+      - xpack.security.http.ssl.enabled=false
+      - xpack.license.self_generated.type=trial
+      - http.max_initial_line_length=248k
+      - ES_JAVA_OPTS=-Xms4g -Xmx4g
+      - http.max_content_length=200mb
+      - network.host=0.0.0.0
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    cap_add:
+      - IPC_LOCK
+    volumes:
+      - es02_data:/usr/share/elasticsearch/data
+    networks:
+      - elastic-net
+    ports:
+      - "9201:9200"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:9200 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
+
+  es03:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.15.0
+    container_name: es03
+    environment:
+      - node.name=es03
+      - cluster.name=es-cluster
+      - cluster.initial_master_nodes=es01,es02,es03
+      - discovery.seed_hosts=es01,es02
+      - ELASTIC_PASSWORD=NICOLAS123@@@
+      - bootstrap.memory_lock=true
+      - xpack.security.enabled=false
+      - xpack.security.http.ssl.enabled=false
+      - xpack.license.self_generated.type=trial
+      - http.max_initial_line_length=248k
+      - ES_JAVA_OPTS=-Xms4g -Xmx4g
+      - http.max_content_length=200mb
+      - network.host=0.0.0.0
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    cap_add:
+      - IPC_LOCK
+    volumes:
+      - es03_data:/usr/share/elasticsearch/data
+    networks:
+      - elastic-net
+    ports:
+      - "9202:9200"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:9200 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      restart_policy:
+        condition: on-failure
         delay: 5s
         max_attempts: 3
         window: 120s
@@ -27,23 +136,37 @@ services:
     image: docker.elastic.co/kibana/kibana:8.15.0
     container_name: kibana
     environment:
-      - ELASTICSEARCH_URL=http://elasticsearch:9200
-      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      - ELASTICSEARCH_HOSTS=["http://es01:9200","http://es02:9200","http://es03:9200"]
       - ELASTICSEARCH_USERNAME=kibana_system
       - ELASTICSEARCH_PASSWORD=NICOLAS123@@@
       - xpack.security.enabled=false
       - xpack.license.self_generated.type=trial
+    volumes:
+      - kibana_data:/usr/share/kibana/data
     networks:
       - elastic-net
     ports:
-      - "5601:5601" # Expose Kibana on port 5601
+      - "5601:5601"
     depends_on:
-      elasticsearch:
-        condition: service_started # Kibana will wait for Elasticsearch to start
+      - es01
+      - es02
+      - es03
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:5601 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
-# volumes:
-#   elasticsearch_data:  # Persistent volume for Elasticsearch data
+volumes:
+  es01_data:
+    driver: local
+  es02_data:
+    driver: local
+  es03_data:
+    driver: local
+  kibana_data:
+    driver: local
 
 networks:
   elastic-net:
-    external: true # Use an existing network
+    driver: bridge
