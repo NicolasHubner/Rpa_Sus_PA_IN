@@ -1,7 +1,49 @@
-rpa_sus/data
-dsx
-health.py
+# Python cache files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
 
-rpa_sus/configs/__pycache__/
-rpa_sus/functions/__pycache__/
-rpa_sus/functions/csv_extract_folders/__pycache__/
+# Python compiled files
+*.pyc
+*.pyo
+*cpython-*.pyc
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+
+# Virtual environments
+myenv/
+venv/
+ENV/
+env/
+.env
+
+# IDE specific files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs
+*.log
+
+# Local configuration
+.env
+.env.local
+
+# Database files
+*.sqlite3
+*.db
+
+# Elastic search local data
+elastic-start-local/data/
+rpa_sus/data/*
+
+# Next.js
+.next/
+out/
+node_modules/

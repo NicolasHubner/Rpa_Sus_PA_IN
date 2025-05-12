@@ -22,7 +22,7 @@ import psutil
 from rpa_sus.functions.dbf.common.clean_data_record import clean_column_data
 from rpa_sus.functions.dbf.common.read_in_batches import read_in_batches
 from rpa_sus.configs.constants import state_codes
-from rpa_sus.configs.database import ELASTICSEARCH_HOST, ES_INDEX_NAME_PREFIX, MAX_RETRIES, RETRY_DELAY, ELASTIC_USERNAME, ELASTIC_PASSWORD
+from rpa_sus.configs.database import NUM_PROCESSES, ELASTICSEARCH_HOST, ES_INDEX_NAME_PREFIX, MAX_RETRIES, RETRY_DELAY, ELASTIC_USERNAME, ELASTIC_PASSWORD
 
 http.client._MAXLINE = 1000000  # Increase the maximum line length
 
@@ -63,8 +63,6 @@ COLUNS_TO_WATCH_92_97 = [
     "DIAS_PERM",
 ]
 
-
-NUM_PROCESSES = 2
 
 # Initialize global counter to track processed records
 processed_records_count = 0
