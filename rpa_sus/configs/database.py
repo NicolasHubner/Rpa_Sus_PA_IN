@@ -5,7 +5,7 @@ import os
 load_dotenv()
 
 
-ELASTICSEARCH_HOST = os.getenv('ELASTICSEARCH_HOST')
+ELASTICSEARCH_HOST = 'http://146.190.213.196:9200'
 ES_INDEX_NAME_PREFIX = os.getenv('ES_INDEX_NAME_PREFIX')
 CHUNK_SIZE = os.getenv('CHUNK_SIZE')  # Adjust the chunk size for bulk indexing
 ELASTIC_USERNAME = os.getenv('ELASTIC_USERNAME')

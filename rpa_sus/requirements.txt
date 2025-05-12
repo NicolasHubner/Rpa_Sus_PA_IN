@@ -1,0 +1,12 @@
+certifi==2025.4.26
+dbfread==2.0.7
+dotenv==0.9.9
+elastic-transport==8.17.1
+elasticsearch==8.16.0
+psutil==7.0.0
+python-dateutil==2.9.0.post0
+python-dotenv==1.1.0
+six==1.17.0
+tenacity==9.1.2
+typing_extensions==4.13.2
+urllib3==2.4.0
