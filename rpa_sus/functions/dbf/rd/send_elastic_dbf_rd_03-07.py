@@ -39,7 +39,6 @@ logging.getLogger("elastic_transport.node_pool").setLevel(logging.ERROR)
 # If you're using urllib3 with verify=False, also suppress these warnings
 warnings.simplefilter('ignore', InsecureRequestWarning)
 
-
 dbf_directory = '/mnt/volume_nyc1_01/nicolas/rd-2003-2007'
 
 INT_CHUNK_SIZE = int(CHUNK_SIZE)
@@ -81,6 +80,7 @@ try:
         [ELASTICSEARCH_HOST],
         basic_auth=(ELASTIC_USERNAME, ELASTIC_PASSWORD),
         retry_on_timeout=True,
+        verify_certs=False,  # Disable SSL certificate verification
         max_retries=MAX_RETRIES,
     ).options(request_timeout=120)  # Increase request timeout to 120 seconds
 

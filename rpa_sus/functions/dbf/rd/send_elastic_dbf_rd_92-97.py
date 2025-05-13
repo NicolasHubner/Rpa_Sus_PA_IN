@@ -81,6 +81,7 @@ try:
         [ELASTICSEARCH_HOST],
         basic_auth=(ELASTIC_USERNAME, ELASTIC_PASSWORD),
         retry_on_timeout=True,
+        verify_certs=False,
         max_retries=MAX_RETRIES,
     ).options(request_timeout=120)  # Increase request timeout to 120 seconds
 

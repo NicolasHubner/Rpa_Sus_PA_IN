@@ -79,6 +79,7 @@ try:
     es_client = Elasticsearch(
         [ELASTICSEARCH_HOST],
         basic_auth=(ELASTIC_USERNAME, ELASTIC_PASSWORD),
+        verify_certs=False,
         retry_on_timeout=True,
         max_retries=MAX_RETRIES,
     ).options(request_timeout=120)  # Increase request timeout to 120 seconds
