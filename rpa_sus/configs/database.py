@@ -12,4 +12,4 @@ ELASTIC_PASSWORD = os.getenv('DATABASE_ELASTIC_PASSWORD')
 
 MAX_RETRIES = 3  # Max retry attempts for failed chunks
 RETRY_DELAY = 5  # Delay (in seconds) between retry attempts
-NUM_PROCESSES = 2  # Number of parallel processes
+NUM_PROCESSES = 6  # Number of parallel processes

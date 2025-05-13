@@ -22,7 +22,7 @@ import psutil
 from rpa_sus.functions.dbf.common.clean_data_record import clean_column_data
 from rpa_sus.functions.dbf.common.read_in_batches import read_in_batches
 from rpa_sus.configs.constants import state_codes
-from rpa_sus.configs.database import NUM_PROCESSES, ELASTICSEARCH_HOST, ES_INDEX_NAME_PREFIX, MAX_RETRIES, RETRY_DELAY, ELASTIC_USERNAME, ELASTIC_PASSWORD
+from rpa_sus.configs.database import CHUNK_SIZE, NUM_PROCESSES, ELASTICSEARCH_HOST, ES_INDEX_NAME_PREFIX, MAX_RETRIES, RETRY_DELAY, ELASTIC_USERNAME, ELASTIC_PASSWORD
 
 http.client._MAXLINE = 1000000  # Increase the maximum line length
 
@@ -41,6 +41,8 @@ warnings.simplefilter('ignore', InsecureRequestWarning)
 
 
 dbf_directory = '/mnt/volume_nyc1_01/nicolas/rd-2003-2007'
+
+INT_CHUNK_SIZE = int(CHUNK_SIZE)
 
 COLUNS_TO_WATCH_2003_2007 = [
     "UF_ZI",
@@ -91,8 +93,6 @@ except Exception as connection_error:
     logging.error(f"Traceback: {traceback.format_exc()}")
     sys.exit(1)
 
-
-INT_CHUNK_SIZE = int(5000)
 
 # Precomputed mapping for state codes
 code_to_state = {value: key for key, value in state_codes.items()}
