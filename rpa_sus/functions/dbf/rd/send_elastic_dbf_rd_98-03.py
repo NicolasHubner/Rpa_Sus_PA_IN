@@ -39,6 +39,7 @@ logging.getLogger("elastic_transport.node_pool").setLevel(logging.ERROR)
 # If you're using urllib3 with verify=False, also suppress these warnings
 warnings.simplefilter('ignore', InsecureRequestWarning)
 
+dbf_directory = '/mnt/volume_nyc1_01/nicolas/rd-98-03'
 
 COLUNS_TO_WATCH_98_03 = [
     "UF_ZI",
@@ -48,7 +49,7 @@ COLUNS_TO_WATCH_98_03 = [
     "CGC_HOSP",
     "N_AIH",
     "IDENT",
-    "UTI_TOTAL",
+    "UTI_MES_TO",
     "PROC_REA",
     "VAL_SH",
     "VAL_SP",
@@ -70,8 +71,6 @@ COLUNS_TO_WATCH_98_03 = [
 processed_records_count = 0
 
 MAX_BACKOFF = 60  # Maximum backoff time in seconds
-
-dbf_directory = '/home/nicolas/FreeLancers/FlavioProject/rpa_sus/data'
 
 # Create Elasticsearch client with comprehensive error handling
 try:
@@ -219,7 +218,7 @@ def ensure_index_exists(index_name: str):
                             "CGC_HOSP": {"type": "keyword"},
                             "N_AIH": {"type": "keyword"},
                             "IDENT": {"type": "keyword"},
-                            "UTI_TOTAL": {"type": "integer"},
+                            "UTI_MES_TO": {"type": "integer"},
                             "PROC_REA": {"type": "keyword"},
                             "VAL_SH": {"type": "float"},
                             "VAL_SP": {"type": "float"},
