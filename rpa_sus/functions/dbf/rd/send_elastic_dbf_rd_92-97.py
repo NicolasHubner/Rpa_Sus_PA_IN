@@ -28,7 +28,7 @@ http.client._MAXLINE = 1000000  # Increase the maximum line length
 
 #fmton
 
-dbf_directory = '/mnt/volume_nyc1_01/nicolas/rd-92-97'
+dbf_directory = '/mnt/volume_nyc1_01/nicolas/rd_92-97'
 
 # Configure logging
 logging.basicConfig(level=logging.INFO,
