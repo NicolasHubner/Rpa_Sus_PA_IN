@@ -42,7 +42,7 @@ warnings.simplefilter('ignore', InsecureRequestWarning)
 
 dbf_directory = '/mnt/volume_nyc1_01/nicolas/rd-2003-2007'
 
-COLUNS_TO_WATCH_98_03 = [
+COLUNS_TO_WATCH_2003_2007 = [
     "UF_ZI",
     "ANO_CMPT",
     "MES_CMPT",
@@ -155,7 +155,7 @@ def handle_data_conversion_rd_97_03(ANO, MES):
         return None
 
 
-def prepare_es_doc(record, index_name, fields_to_include=COLUNS_TO_WATCH_98_03):
+def prepare_es_doc(record, index_name, fields_to_include=COLUNS_TO_WATCH_2003_2007):
     """Prepare a document for Elasticsearch by cleaning and transforming data."""
     # Step 1: Clean the record by preprocessing columns
     cleaned_record = clean_column_data(record)
