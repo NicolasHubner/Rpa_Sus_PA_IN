@@ -184,6 +184,19 @@ def prepare_es_doc(record, index_name, fields_to_include=COLUNS_TO_WATCH_98_03):
             formatted_date = None
         cleaned_record["@DATA"] = formatted_date  # Update the field
 
+    # Step 6: Handle VAL_GERAL
+    cleaned_record["VAL_GERAL"] = cleaned_record['VAL_TOT']
+
+    # Generate a unique document ID
+    doc_id = generate_document_id(cleaned_record)
+
+    # Step 8: Prepare the final document for Elasticsearch
+    return {
+        '_index': index_name,
+        '_id': doc_id,  # Add the unique document ID
+        '_source': {k: str(v) if v is not None else None for k, v in cleaned_record.items()},
+    }
+
     # Generate a unique document ID
     doc_id = generate_document_id(cleaned_record)
 

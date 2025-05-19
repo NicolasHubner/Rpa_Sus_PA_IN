@@ -182,6 +182,9 @@ def prepare_es_doc(record, index_name, fields_to_include=COLUNS_TO_WATCH_2003_20
             formatted_date = None
         cleaned_record["@DATA"] = formatted_date  # Update the field
 
+    # Step 6: Handle VAL_GERAL
+    cleaned_record["VAL_GERAL"] = cleaned_record['VAL_TOT']
+
     # Generate a unique document ID
     doc_id = generate_document_id(cleaned_record)
 

@@ -176,7 +176,7 @@ def prepare_es_doc(record, index_name, fields_to_include=COLUNS_TO_WATCH_92_97):
         cleaned_record = {
             k: v for k, v in cleaned_record.items() if k in fields_to_include}
 
-    # # Step 4: Handle PA_CMP conversion to yyyyMM format
+    # # Step 4: Handle DATA conversion to yyyyMM format
     ano_cmpt = cleaned_record.get("ANO_CMPT", "")
     mes_cmpt = cleaned_record.get("MES_CMPT", "")
     if ano_cmpt and mes_cmpt:
@@ -188,6 +188,9 @@ def prepare_es_doc(record, index_name, fields_to_include=COLUNS_TO_WATCH_92_97):
             # Handle the case where conversion wasn't possible
             formatted_date = None
         cleaned_record["@DATA"] = formatted_date  # Update the field
+
+    # Step 6: Handle VAL_GERAL
+    cleaned_record["VAL_GERAL"] = cleaned_record['VAL_TOT']
 
     # Generate a unique document ID
     doc_id = generate_document_id(cleaned_record)
