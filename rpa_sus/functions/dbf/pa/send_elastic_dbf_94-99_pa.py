@@ -19,6 +19,9 @@ import http.client
 import gc
 import psutil
 
+import random
+import hashlib
+
 from rpa_sus.functions.dbf.common.clean_data_record import clean_column_data
 from rpa_sus.functions.dbf.common.read_in_batches import read_in_batches
 from rpa_sus.configs.constants import state_codes
@@ -39,7 +42,8 @@ logging.getLogger("elastic_transport.node_pool").setLevel(logging.ERROR)
 # If you're using urllib3 with verify=False, also suppress these warnings
 warnings.simplefilter('ignore', InsecureRequestWarning)
 
-dbf_directory = '/mnt/volume_nyc1_01/nicolas/rd-2003-2007'
+# dbf_directory = '/mnt/volume_nyc1_01/nicolas/rd-2003-2007'
+dbf_directory = '/home/nicolas/FreeLancers/FlavioProject/rpa_sus/data/pa'
 
 INT_CHUNK_SIZE = int(CHUNK_SIZE)
 
@@ -89,21 +93,33 @@ code_to_state = {value: key for key, value in state_codes.items()}
 # Function to generate a unique document ID based on multiple fields
 def generate_document_id(record):
     """Generate a unique document ID based on multiple fields."""
+
+    
     # Select fields that together make a record unique
     # Adjust these fields based on your data structure
     unique_fields = [
-        record.get("UF_ZI", ""),
-        record.get("ANO_CMPT", ""),
-        record.get("MES_CMPT", ""),
-        record.get("CGC_HOSP", ""),
-        record.get("N_AIH", "")
+        record.get("PA_CODUNI", ""),
+        record.get("PA_GESTAO", ""),
+        record.get("PA_UFMUN", ""),
+        record.get("PA_DATPR", ""),
+        record.get("PA_DATREF", ""),
+        record.get("PA_CODPRO", ""),
+        record.get("PA_QTDPRO", ""),
+        record.get("PA_QTDAPR", ""),
+        record.get("PA_VALPRO", ""),
+        record.get("PA_VALAPR", ""),
     ]
-
-    # Join the fields with a separator and create a hash
-    unique_id = "_".join(str(field) for field in unique_fields if field)
-
-    # Return the unique ID
-    return unique_id
+    
+    # Join the fields with a separator
+    base_id = "_".join(str(field) for field in unique_fields if field)
+    
+    # Add a random component to ensure uniqueness
+    random_component = str(random.randint(1000, 99999999))
+    
+    # Combine the base ID with the random component
+    combined_id = f"{base_id}_{random_component}"
+    
+    return combined_id
 
 def get_mapped_value(code, mapping, default="Unknown"):
     """Helper function to get mapped value from a dictionary."""
@@ -112,6 +128,20 @@ def get_mapped_value(code, mapping, default="Unknown"):
     except ValueError:
         return default
 
+def get_mapped_name_state(code, mapping, default="Unknown"):
+    """Helper function to get state name from a code where only the first two digits matter."""
+    try:
+        # Convert to string if it's not already
+        code_str = str(code).strip()
+        
+        # Extract the first two digits if the code is long enough
+        if len(code_str) >= 2:
+            state_code = code_str[:2]  # Get first two digits
+            return get_mapped_value(state_code, mapping, default)
+        else:
+            return default
+    except ValueError:
+        return default
 
 def handle_data_conversion_pa_94_99(date_value):
     """Handle data conversion for PA_DATPR and PA_DATREF fields in PA_94_99 format."""
@@ -152,8 +182,8 @@ def prepare_es_doc(record, index_name, fields_to_include=COLUNS_TO_WATCH_PA_94_9
     cleaned_record = clean_column_data(record)
 
     # Step 3: Handle UF_ZI conversion
-    cleaned_record["UF_ZI"] = get_mapped_value(
-        cleaned_record["UF_ZI"], code_to_state)
+    cleaned_record["PA_UFMUN"] = get_mapped_name_state(
+        cleaned_record["PA_UFMUN"], code_to_state)
 
     # Step 2: Filter the record to include only specified fields (optional)
     if fields_to_include:
@@ -175,8 +205,11 @@ def prepare_es_doc(record, index_name, fields_to_include=COLUNS_TO_WATCH_PA_94_9
     # Step 6: Handle VAL_GERAL
     cleaned_record["VAL_GERAL"] = cleaned_record['PA_VALAPR']
 
-    # Generate a unique document ID
-    doc_id = generate_document_id(cleaned_record)
+    # Step 7: Handle CNPJCPF
+    cleaned_record["PA_CNPJCPF"] = cleaned_record["PA_CODUNI"]
+
+    # Generate a unique document ID withou CLEANED RECORD AVOID GOING TO ELASTICSEARCH
+    doc_id = generate_document_id(record)
 
     # Step 8: Prepare the final document for Elasticsearch
     return {
@@ -205,31 +238,20 @@ def ensure_index_exists(index_name: str):
                     },
                     "mappings": {
                         "properties": {
-                            "UF_ZI": {"type": "keyword"},
-                            "ANO_CMPT": {"type": "keyword"},
-                            "MES_CMPT": {"type": "keyword"},
-                            "ESPEC": {"type": "keyword"},
-                            "CGC_HOSP": {"type": "keyword"},
-                            "N_AIH": {"type": "keyword"},
-                            "IDENT": {"type": "keyword"},
-                            "UTI_MES_TO": {"type": "integer"}, #98 -> 2003
-                            "PROC_REA": {"type": "keyword"},
-                            "VAL_SH": {"type": "float"},
-                            "VAL_SP": {"type": "float"},
-                            "VAL_SADT": {"type": "float"},
-                            "VAL_TOT": {"type": "float"},
-                            "VAL_UTI": {"type": "float"}, #98 -> 2003
-                            "DT_INTER": {"type": "keyword"},
-                            "DT_SAIDA": {"type": "keyword"},
-                            "DIAG_PRINC": {"type": "keyword"},
-                            "COBRANCA": {"type": "keyword"},
-                            "NATUREZA": {"type": "keyword"},
-                            "GESTAO": {"type": "keyword"}, #98 -> 2003
-                            "MUNIC_MOV": {"type": "keyword"},
-                            "DIAS_PERM": {"type": "keyword"},
-                            "CNES": {"type": "keyword"}, #04 -> 2007
+                            "PA_CODUNI": {"type": "keyword"},
+                            "PA_GESTAO": {"type": "keyword"},
+                            "PA_UFMUN": {"type": "keyword"},
+                            "PA_DATPR": {"type": "keyword"},
+                            "PA_DATREF": {"type": "keyword"},
+                            "PA_CODPRO": {"type": "keyword"},
+                            "PA_QTDPRO": {"type": "integer"},
+                            "PA_QTDAPR": {"type": "integer"},
+                            "PA_VALPRO": {"type": "float"},
+                            "PA_VALAPR": {"type": "float"},
+
                             "@DATA": {"type": "date"},
                             "VAL_GERAL": {"type": "float"},
+                            "PA_CNPJCPF": {"type": "keyword"},
                         }
                     }
                 }
@@ -355,9 +377,6 @@ def parallel_bulk_index(dbf_directory):
     logging.info(
         f"System has {cpu_count} CPUs and {total_memory_gb:.1f}GB RAM")
     logging.info(f"Using {worker_count} worker processes")
-
-    # Create a separate Elasticsearch client for each process
-    es_clients = {}
 
     for batch_start in range(0, total_file_count, batch_size):
         batch_end = min(batch_start + batch_size, total_file_count)

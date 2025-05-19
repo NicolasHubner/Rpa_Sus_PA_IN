@@ -1,5 +1,7 @@
 # fmt: off
 # Add the project root directory to Python path
+import hashlib
+import random
 import sys
 import os
 project_root = os.path.abspath(os.path.join(
@@ -111,11 +113,21 @@ def generate_document_id(record):
         record.get("N_AIH", "")
     ]
     
-    # Join the fields with a separator and create a hash
-    unique_id = "_".join(str(field) for field in unique_fields if field)
+    # Join the fields with a separator
+    base_id = "_".join(str(field) for field in unique_fields if field)
     
-    # Return the unique ID
-    return unique_id
+    # Add a random component to ensure uniqueness
+    random_component = str(random.randint(1000, 9999))
+    
+    # Combine the base ID with the random component
+    combined_id = f"{base_id}_{random_component}"
+    
+    # Optionally, you can hash the combined ID for a fixed-length ID
+    # This is useful if your IDs might get too long
+    hashed_id = hashlib.md5(combined_id.encode()).hexdigest()
+    
+    # Return the unique ID with random component
+    return hashed_id
 
 def get_mapped_value(code, mapping, default="Unknown"):
     """Helper function to get mapped value from a dictionary."""

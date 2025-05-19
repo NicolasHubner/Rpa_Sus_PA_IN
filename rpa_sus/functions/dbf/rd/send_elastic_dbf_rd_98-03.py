@@ -1,5 +1,7 @@
 # fmt: off
 # Add the project root directory to Python path
+import hashlib
+import random
 import sys
 import os
 project_root = os.path.abspath(os.path.join(
@@ -39,7 +41,8 @@ logging.getLogger("elastic_transport.node_pool").setLevel(logging.ERROR)
 # If you're using urllib3 with verify=False, also suppress these warnings
 warnings.simplefilter('ignore', InsecureRequestWarning)
 
-dbf_directory = '/mnt/volume_nyc1_01/nicolas/rd-98-03'
+# dbf_directory = '/mnt/volume_nyc1_01/nicolas/rd-98-03'
+dbf_directory = '/home/nicolas/FreeLancers/FlavioProject/rpa_sus/data/rd'
 
 INT_CHUNK_SIZE = int(CHUNK_SIZE)
 
@@ -113,11 +116,21 @@ def generate_document_id(record):
         record.get("N_AIH", "")
     ]
     
-    # Join the fields with a separator and create a hash
-    unique_id = "_".join(str(field) for field in unique_fields if field)
+    # Join the fields with a separator
+    base_id = "_".join(str(field) for field in unique_fields if field)
     
-    # Return the unique ID
-    return unique_id
+    # Add a random component to ensure uniqueness
+    random_component = str(random.randint(1000, 9999))
+    
+    # Combine the base ID with the random component
+    combined_id = f"{base_id}_{random_component}"
+    
+    # Optionally, you can hash the combined ID for a fixed-length ID
+    # This is useful if your IDs might get too long
+    hashed_id = hashlib.md5(combined_id.encode()).hexdigest()
+    
+    # Return the unique ID with random component
+    return hashed_id
 
 def get_mapped_value(code, mapping, default="Unknown"):
     """Helper function to get mapped value from a dictionary."""
@@ -186,16 +199,6 @@ def prepare_es_doc(record, index_name, fields_to_include=COLUNS_TO_WATCH_98_03):
 
     # Step 6: Handle VAL_GERAL
     cleaned_record["VAL_GERAL"] = cleaned_record['VAL_TOT']
-
-    # Generate a unique document ID
-    doc_id = generate_document_id(cleaned_record)
-
-    # Step 8: Prepare the final document for Elasticsearch
-    return {
-        '_index': index_name,
-        '_id': doc_id,  # Add the unique document ID
-        '_source': {k: str(v) if v is not None else None for k, v in cleaned_record.items()},
-    }
 
     # Generate a unique document ID
     doc_id = generate_document_id(cleaned_record)
