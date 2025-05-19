@@ -41,7 +41,8 @@ logging.getLogger("elastic_transport.node_pool").setLevel(logging.ERROR)
 # If you're using urllib3 with verify=False, also suppress these warnings
 warnings.simplefilter('ignore', InsecureRequestWarning)
 
-dbf_directory = '/mnt/volume_nyc1_01/nicolas/rd-2003-2007'
+# dbf_directory = '/mnt/volume_nyc1_01/nicolas/rd-2003-2007'
+dbf_directory = '/home/nicolas/FreeLancers/FlavioProject/rpa_sus/data/rd'
 
 INT_CHUNK_SIZE = int(CHUNK_SIZE)
 
@@ -117,7 +118,7 @@ def generate_document_id(record):
     base_id = "_".join(str(field) for field in unique_fields if field)
     
     # Add a random component to ensure uniqueness
-    random_component = str(random.randint(1000, 9999))
+    random_component = str(random.randint(1000, 99999999))
     
     # Combine the base ID with the random component
     combined_id = f"{base_id}_{random_component}"

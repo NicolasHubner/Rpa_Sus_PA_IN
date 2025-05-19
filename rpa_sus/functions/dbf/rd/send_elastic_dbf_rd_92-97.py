@@ -120,7 +120,7 @@ def generate_document_id(record):
     base_id = "_".join(str(field) for field in unique_fields if field)
     
     # Add a random component to ensure uniqueness
-    random_component = str(random.randint(1000, 9999))
+    random_component = str(random.randint(1000, 99999999))
     
     # Combine the base ID with the random component
     combined_id = f"{base_id}_{random_component}"
