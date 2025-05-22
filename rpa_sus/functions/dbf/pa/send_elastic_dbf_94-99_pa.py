@@ -18,6 +18,7 @@ import traceback
 import http.client
 import gc
 import psutil
+import pandas as pd
 
 import random
 import hashlib
@@ -85,10 +86,8 @@ except Exception as connection_error:
     logging.error(f"Traceback: {traceback.format_exc()}")
     sys.exit(1)
 
-
 # Precomputed mapping for state codes
 code_to_state = {value: key for key, value in state_codes.items()}
-
 
 # Function to generate a unique document ID based on multiple fields
 def generate_document_id(record):
@@ -115,11 +114,17 @@ def generate_document_id(record):
     
     # Add a random component to ensure uniqueness
     random_component = str(random.randint(1000, 99999999))
-    
+
     # Combine the base ID with the random component
     combined_id = f"{base_id}_{random_component}"
     
-    return combined_id
+   # Optionally, you can hash the combined ID for a fixed-length ID
+    # This is useful if your IDs might get too long
+    hashed_id = hashlib.md5(combined_id.encode()).hexdigest()
+    
+    # Return the unique ID with random component
+    return hashed_id
+
 
 def get_mapped_value(code, mapping, default="Unknown"):
     """Helper function to get mapped value from a dictionary."""
@@ -176,6 +181,111 @@ def handle_data_conversion_pa_94_99(date_value):
         return None
 
 
+# Global variable to store the mapping
+_coduni_to_cnpj_map = None
+
+def load_coduni_to_cnpj_mapping(excel_path):
+    """Load the PA_CODUNI to CNPJ_CPF mapping from an Excel file.
+    
+    Args:
+        excel_path: Path to the Excel file containing the mapping
+        
+    Returns:
+        dict: A dictionary mapping PA_CODUNI to CNPJ_CPF
+    """
+    global _coduni_to_cnpj_map
+    
+    if _coduni_to_cnpj_map is None:
+        try:
+            # First, try to import openpyxl to check if it's available
+            try:
+                import openpyxl
+            except ImportError:
+                logging.error("Missing required dependency 'openpyxl'. Installing it now...")
+                import subprocess
+                try:
+                    # Try to install openpyxl using pip
+                    subprocess.check_call([sys.executable, "-m", "pip", "install", "openpyxl"])
+                    logging.info("Successfully installed openpyxl")
+                except subprocess.CalledProcessError:
+                    logging.error("Failed to install openpyxl. Returning empty mapping.")
+                    _coduni_to_cnpj_map = {}
+                    return _coduni_to_cnpj_map
+            
+            # Now try to read the Excel file
+            try:
+                # Read the Excel file from the specific tab "DEPARA_CODUNI_SIA_199407-199910"
+                df = pd.read_excel(excel_path, sheet_name="DEPARA_CODUNI_SIA_199407-199910", engine='openpyxl')
+                
+                # Create a dictionary mapping PA_CODUNI to CNPJ_CPF
+                pa_coduni_col = 'PA_CODUNI'  # Based on your column headers
+                cnpj_cpf_col = 'CNPJ_CPF'    # Based on your column headers
+                
+                if pa_coduni_col in df.columns and cnpj_cpf_col in df.columns:
+                    _coduni_to_cnpj_map = dict(zip(df[pa_coduni_col].astype(str), df[cnpj_cpf_col]))
+                    logging.info(f"Loaded {len(_coduni_to_cnpj_map)} PA_CODUNI to CNPJ_CPF mappings")
+                else:
+                    # Try to find appropriate columns if the expected ones aren't found
+                    available_cols = df.columns.tolist()
+                    logging.warning(f"Expected columns not found. Available columns: {available_cols}")
+                    
+                    # Look for columns that might contain CODUNI and CNPJ information
+                    coduni_candidates = [col for col in available_cols if 'CODUNI' in col.upper() or 'COD' in col.upper()]
+                    cnpj_candidates = [col for col in available_cols if 'CNPJ' in col.upper() or 'CPF' in col.upper()]
+                    
+                    if coduni_candidates and cnpj_candidates:
+                        logging.info(f"Using alternative columns: {coduni_candidates[0]} and {cnpj_candidates[0]}")
+                        _coduni_to_cnpj_map = dict(zip(df[coduni_candidates[0]].astype(str), df[cnpj_candidates[0]]))
+                        logging.info(f"Loaded {len(_coduni_to_cnpj_map)} PA_CODUNI to CNPJ_CPF mappings")
+                    else:
+                        logging.error("Could not find appropriate columns for mapping")
+                        _coduni_to_cnpj_map = {}
+            except Exception as e:
+                logging.error(f"Failed to read Excel file: {e}")
+                _coduni_to_cnpj_map = {}
+        except Exception as e:
+            logging.error(f"Failed to load PA_CODUNI to CNPJ_CPF mapping: {e}")
+            _coduni_to_cnpj_map = {}
+    
+    return _coduni_to_cnpj_map
+
+def prepara_coduni_to_cnpj(coduni):
+    """Convert PA_CODUNI to CNPJ.
+    
+    This function maps PA_CODUNI values to their corresponding CNPJ_CPF values
+    using a mapping loaded from an Excel file. Leading zeros are stripped from
+    the coduni value before lookup.
+    
+    Args:
+        coduni: The PA_CODUNI code to convert
+        
+    Returns:
+        str: The corresponding CNPJ_CPF if found, otherwise the original coduni
+    """
+    try:
+        # Path to the Excel file containing the mapping
+        excel_path = os.path.join(project_root, 'rpa_sus', 'data', 'deparas.xlsx')
+        
+        # Load the mapping if not already loaded
+        mapping = load_coduni_to_cnpj_mapping(excel_path)
+        
+        # Convert coduni to string and strip any whitespace
+        coduni_str = str(coduni).strip() if coduni is not None else ""
+        
+        # Strip leading zeros from the coduni value
+        coduni_stripped = coduni_str.lstrip('0')
+        
+        # Try to find the mapping with the stripped value first
+        if coduni_stripped in mapping:
+            return mapping[coduni_stripped]
+        
+        # If not found with stripped value, try with the original value
+        return mapping.get(coduni_str, coduni_str)
+    except Exception as e:
+        logging.error(f"Error in prepara_coduni_to_cnpj: {e}")
+        # Return the original coduni if there's an error
+        return coduni
+    
 def prepare_es_doc(record, index_name, fields_to_include=COLUNS_TO_WATCH_PA_94_99):
     """Prepare a document for Elasticsearch by cleaning and transforming data."""
     # Step 1: Clean the record by preprocessing columns
@@ -191,7 +301,7 @@ def prepare_es_doc(record, index_name, fields_to_include=COLUNS_TO_WATCH_PA_94_9
             k: v for k, v in cleaned_record.items() if k in fields_to_include}
 
     # # Step 4: Handle PA_CMP conversion to yyyyMM format
-    pa_datpr = cleaned_record.get("ANO_CMPT", "")
+    pa_datpr = cleaned_record.get("PA_DATPR", "")
     if pa_datpr:
         date_value = handle_data_conversion_pa_94_99(pa_datpr)
         if date_value:
@@ -205,8 +315,9 @@ def prepare_es_doc(record, index_name, fields_to_include=COLUNS_TO_WATCH_PA_94_9
     # Step 6: Handle VAL_GERAL
     cleaned_record["VAL_GERAL"] = cleaned_record['PA_VALAPR']
 
-    # Step 7: Handle CNPJCPF
-    cleaned_record["PA_CNPJCPF"] = cleaned_record["PA_CODUNI"]
+    # Step 7: Handle CNPJCPF - Convert PA_CODUNI to CNPJ
+    pa_coduni = cleaned_record.get("PA_CODUNI", "")
+    cleaned_record["PA_CNPJCPF"] = prepara_coduni_to_cnpj(pa_coduni)
 
     # Generate a unique document ID withou CLEANED RECORD AVOID GOING TO ELASTICSEARCH
     doc_id = generate_document_id(record)
