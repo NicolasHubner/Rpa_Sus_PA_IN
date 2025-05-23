@@ -41,7 +41,8 @@ env/
 
 # Elastic search local data
 elastic-start-local/data/
-rpa_sus/data/*
+rpa_sus/data/rd/*
+rpa_sus/data/pa/*
 
 # Next.js
 .next/
