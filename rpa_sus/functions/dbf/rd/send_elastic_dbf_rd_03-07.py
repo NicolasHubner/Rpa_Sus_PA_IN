@@ -171,17 +171,13 @@ def prepare_es_doc(record, index_name, fields_to_include=COLUNS_TO_WATCH_2003_20
     """Prepare a document for Elasticsearch by cleaning and transforming data."""
     # Step 1: Clean the record by preprocessing columns
     cleaned_record = clean_column_data(record)
-
-    # Step 3: Handle UF_ZI conversion
-    cleaned_record["UF_ZI"] = get_mapped_value(
-        cleaned_record["UF_ZI"], code_to_state)
-
+    
     # Step 2: Filter the record to include only specified fields (optional)
     if fields_to_include:
         cleaned_record = {
             k: v for k, v in cleaned_record.items() if k in fields_to_include}
 
-    # # Step 4: Handle PA_CMP conversion to yyyyMM format
+    # Step 3: Handle PA_CMP conversion to yyyyMM format
     ano_cmpt = cleaned_record.get("ANO_CMPT", "")
     mes_cmpt = cleaned_record.get("MES_CMPT", "")
     if ano_cmpt and mes_cmpt:
@@ -194,11 +190,18 @@ def prepare_es_doc(record, index_name, fields_to_include=COLUNS_TO_WATCH_2003_20
             formatted_date = None
         cleaned_record["@DATA"] = formatted_date  # Update the field
 
-    # Step 6: Handle VAL_GERAL
+    # Step 4: Generate a unique document ID
+    doc_id = generate_document_id(cleaned_record)
+
+    # COMUM PARA TODOS
+    # Step 5: Handle VAL_GERAL
     cleaned_record["VAL_GERAL"] = cleaned_record['VAL_TOT']
 
-    # Generate a unique document ID
-    doc_id = generate_document_id(cleaned_record)
+    # Step 6: Handle CNPJ_CPF
+    cleaned_record['CNPJ_CPF'] = cleaned_record['CGC_HOSP']
+
+    # Step 7: Handle Source
+    cleaned_record['SOURCE'] = "SIH"
 
     # Step 8: Prepare the final document for Elasticsearch
     return {
@@ -250,8 +253,12 @@ def ensure_index_exists(index_name: str):
                             "MUNIC_MOV": {"type": "keyword"},
                             "DIAS_PERM": {"type": "keyword"},
                             "CNES": {"type": "keyword"}, #04 -> 2007
+                            
+                            # Comum para todos
                             "@DATA": {"type": "date"},
                             "VAL_GERAL": {"type": "float"},
+                            "CNPJ_CPF": {"type": "keyword"},
+                            "SOURCE": {"type": "keyword"},
                         }
                     }
                 }

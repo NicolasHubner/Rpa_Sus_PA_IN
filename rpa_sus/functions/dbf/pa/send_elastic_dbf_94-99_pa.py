@@ -44,7 +44,6 @@ logging.getLogger("elastic_transport.node_pool").setLevel(logging.ERROR)
 warnings.simplefilter('ignore', InsecureRequestWarning)
 
 # dbf_directory = '/mnt/volume_nyc1_01/nicolas/rd-2003-2007'
-dbf_directory = '/home/nicolas/FreeLancers/FlavioProject/rpa_sus/data/pa'
 
 INT_CHUNK_SIZE = int(CHUNK_SIZE)
 
@@ -254,13 +253,14 @@ def prepara_coduni_to_cnpj(coduni):
     
     This function maps PA_CODUNI values to their corresponding CNPJ_CPF values
     using a mapping loaded from an Excel file. Leading zeros are stripped from
-    the coduni value before lookup.
+    the coduni value before lookup. The returned CNPJ has all slashes, hyphens,
+    and periods removed.
     
     Args:
         coduni: The PA_CODUNI code to convert
         
     Returns:
-        str: The corresponding CNPJ_CPF if found, otherwise the original coduni
+        str: The corresponding CNPJ_CPF (cleaned) if found, otherwise the original coduni
     """
     try:
         # Path to the Excel file containing the mapping
@@ -277,10 +277,17 @@ def prepara_coduni_to_cnpj(coduni):
         
         # Try to find the mapping with the stripped value first
         if coduni_stripped in mapping:
-            return mapping[coduni_stripped]
+            cnpj = mapping[coduni_stripped]
+        else:
+            # If not found with stripped value, try with the original value
+            cnpj = mapping.get(coduni_str, coduni_str)
         
-        # If not found with stripped value, try with the original value
-        return mapping.get(coduni_str, coduni_str)
+        # Clean the CNPJ by removing slashes, hyphens, and periods
+        if cnpj:
+            for char in ['/', '-', '.']:
+                cnpj = cnpj.replace(char, '')
+        
+        return cnpj
     except Exception as e:
         logging.error(f"Error in prepara_coduni_to_cnpj: {e}")
         # Return the original coduni if there's an error
@@ -291,16 +298,12 @@ def prepare_es_doc(record, index_name, fields_to_include=COLUNS_TO_WATCH_PA_94_9
     # Step 1: Clean the record by preprocessing columns
     cleaned_record = clean_column_data(record)
 
-    # Step 3: Handle UF_ZI conversion
-    cleaned_record["PA_UFMUN"] = get_mapped_name_state(
-        cleaned_record["PA_UFMUN"], code_to_state)
-
     # Step 2: Filter the record to include only specified fields (optional)
     if fields_to_include:
         cleaned_record = {
             k: v for k, v in cleaned_record.items() if k in fields_to_include}
 
-    # # Step 4: Handle PA_CMP conversion to yyyyMM format
+    # Step 3: Handle PA_CMP conversion to yyyyMM format
     pa_datpr = cleaned_record.get("PA_DATPR", "")
     if pa_datpr:
         date_value = handle_data_conversion_pa_94_99(pa_datpr)
@@ -312,15 +315,19 @@ def prepare_es_doc(record, index_name, fields_to_include=COLUNS_TO_WATCH_PA_94_9
             formatted_date = None
         cleaned_record["@DATA"] = formatted_date  # Update the field
 
-    # Step 6: Handle VAL_GERAL
+    # Step 4: Generate a unique document ID
+    doc_id = generate_document_id(cleaned_record)
+    
+    # COMUM PARA TODOS
+    # Step 4: Handle VAL_GERAL
     cleaned_record["VAL_GERAL"] = cleaned_record['PA_VALAPR']
 
-    # Step 7: Handle CNPJCPF - Convert PA_CODUNI to CNPJ
+    # Step 5: Handle CNPJCPF - Convert PA_CODUNI to CNPJ
     pa_coduni = cleaned_record.get("PA_CODUNI", "")
-    cleaned_record["PA_CNPJCPF"] = prepara_coduni_to_cnpj(pa_coduni)
+    cleaned_record["CNPJ_CPF"] = prepara_coduni_to_cnpj(pa_coduni)
 
-    # Generate a unique document ID withou CLEANED RECORD AVOID GOING TO ELASTICSEARCH
-    doc_id = generate_document_id(record)
+    # Step 7: Handle Source
+    cleaned_record["SOURCE"] = 'SIA'
 
     # Step 8: Prepare the final document for Elasticsearch
     return {
@@ -362,7 +369,8 @@ def ensure_index_exists(index_name: str):
 
                             "@DATA": {"type": "date"},
                             "VAL_GERAL": {"type": "float"},
-                            "PA_CNPJCPF": {"type": "keyword"},
+                            "CNPJ_CPF": {"type": "keyword"},
+                            "SOURCE": {"type": "keyword"},
                         }
                     }
                 }
