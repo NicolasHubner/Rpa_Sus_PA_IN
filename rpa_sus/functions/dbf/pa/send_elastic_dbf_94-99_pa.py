@@ -195,7 +195,7 @@ def prepara_coduni_to_cnpj(coduni, uf_code):
     """
     try:
         import sqlite3
-        DB_PATH = "/home/nicolas/FreeLancers/FlavioProject/rpa_sus/data/codigos.db"
+        DB_PATH = "/home/nicolas/Rpa_Sus_PA_IN/rpa_sus/data/codigos.db"
         
         # Convert coduni to string and strip any whitespace and leading zeros
         coduni_str = str(coduni)if coduni is not None else ""
