@@ -37,7 +37,8 @@ env/
 
 # Database files
 *.sqlite3
-*.db
+*.dbf
+*.pyc
 
 # Elastic search local data
 elastic-start-local/data/

@@ -138,16 +138,6 @@ def get_mapped_value(code, mapping, default="Unknown"):
     except ValueError:
         return default
 
-
-def handle_date_conversion(date_value):
-    """Helper function to convert date to yyyyMM format."""
-    try:
-        # Assuming date_value is in the format YYYYMM or a valid integer
-        return datetime.datetime.strptime(str(date_value), "%Y%m").strftime("%Y%m")
-    except ValueError:
-        return None
-
-
 def handle_data_conversion_rd_97_03(ANO, MES):
     """Handle data conversion for PA_CMP files."""
     # Step 5: Handle PA_CMP conversion to datetime format

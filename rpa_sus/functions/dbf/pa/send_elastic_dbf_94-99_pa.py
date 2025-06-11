@@ -180,119 +180,76 @@ def handle_data_conversion_pa_94_99(date_value):
         return None
 
 
-# Global variable to store the mapping
-_coduni_to_cnpj_map = None
-
-def load_coduni_to_cnpj_mapping(excel_path):
-    """Load the PA_CODUNI to CNPJ_CPF mapping from an Excel file.
+def prepara_coduni_to_cnpj(coduni, uf_code):
+    """Convert PA_CODUNI to CNPJ by directly querying the database.
     
-    Args:
-        excel_path: Path to the Excel file containing the mapping
-        
-    Returns:
-        dict: A dictionary mapping PA_CODUNI to CNPJ_CPF
-    """
-    global _coduni_to_cnpj_map
-    
-    if _coduni_to_cnpj_map is None:
-        try:
-            # First, try to import openpyxl to check if it's available
-            try:
-                import openpyxl
-            except ImportError:
-                logging.error("Missing required dependency 'openpyxl'. Installing it now...")
-                import subprocess
-                try:
-                    # Try to install openpyxl using pip
-                    subprocess.check_call([sys.executable, "-m", "pip", "install", "openpyxl"])
-                    logging.info("Successfully installed openpyxl")
-                except subprocess.CalledProcessError:
-                    logging.error("Failed to install openpyxl. Returning empty mapping.")
-                    _coduni_to_cnpj_map = {}
-                    return _coduni_to_cnpj_map
-            
-            # Now try to read the Excel file
-            try:
-                # Read the Excel file from the specific tab "DEPARA_CODUNI_SIA_199407-199910"
-                df = pd.read_excel(excel_path, sheet_name="DEPARA_CODUNI_SIA_199407-199910", engine='openpyxl')
-                
-                # Create a dictionary mapping PA_CODUNI to CNPJ_CPF
-                pa_coduni_col = 'PA_CODUNI'  # Based on your column headers
-                cnpj_cpf_col = 'CNPJ_CPF'    # Based on your column headers
-                
-                if pa_coduni_col in df.columns and cnpj_cpf_col in df.columns:
-                    _coduni_to_cnpj_map = dict(zip(df[pa_coduni_col].astype(str), df[cnpj_cpf_col]))
-                    logging.info(f"Loaded {len(_coduni_to_cnpj_map)} PA_CODUNI to CNPJ_CPF mappings")
-                else:
-                    # Try to find appropriate columns if the expected ones aren't found
-                    available_cols = df.columns.tolist()
-                    logging.warning(f"Expected columns not found. Available columns: {available_cols}")
-                    
-                    # Look for columns that might contain CODUNI and CNPJ information
-                    coduni_candidates = [col for col in available_cols if 'CODUNI' in col.upper() or 'COD' in col.upper()]
-                    cnpj_candidates = [col for col in available_cols if 'CNPJ' in col.upper() or 'CPF' in col.upper()]
-                    
-                    if coduni_candidates and cnpj_candidates:
-                        logging.info(f"Using alternative columns: {coduni_candidates[0]} and {cnpj_candidates[0]}")
-                        _coduni_to_cnpj_map = dict(zip(df[coduni_candidates[0]].astype(str), df[cnpj_candidates[0]]))
-                        logging.info(f"Loaded {len(_coduni_to_cnpj_map)} PA_CODUNI to CNPJ_CPF mappings")
-                    else:
-                        logging.error("Could not find appropriate columns for mapping")
-                        _coduni_to_cnpj_map = {}
-            except Exception as e:
-                logging.error(f"Failed to read Excel file: {e}")
-                _coduni_to_cnpj_map = {}
-        except Exception as e:
-            logging.error(f"Failed to load PA_CODUNI to CNPJ_CPF mapping: {e}")
-            _coduni_to_cnpj_map = {}
-    
-    return _coduni_to_cnpj_map
-
-def prepara_coduni_to_cnpj(coduni):
-    """Convert PA_CODUNI to CNPJ.
-    
-    This function maps PA_CODUNI values to their corresponding CNPJ_CPF values
-    using a mapping loaded from an Excel file. Leading zeros are stripped from
-    the coduni value before lookup. The returned CNPJ has all slashes, hyphens,
-    and periods removed.
+    This function queries the database to find the normalized_tax (CNPJ) 
+    for the given coduni and state_code (from uf_code).
     
     Args:
         coduni: The PA_CODUNI code to convert
+        uf_code: State code in format like 410690
         
     Returns:
-        str: The corresponding CNPJ_CPF (cleaned) if found, otherwise the original coduni
+        str: The corresponding CNPJ_CPF if found, otherwise the original coduni
     """
     try:
-        # Path to the Excel file containing the mapping
-        excel_path = os.path.join(project_root, 'rpa_sus', 'data', 'deparas.xlsx')
+        import sqlite3
+        DB_PATH = "/home/nicolas/FreeLancers/FlavioProject/rpa_sus/data/codigos.db"
         
-        # Load the mapping if not already loaded
-        mapping = load_coduni_to_cnpj_mapping(excel_path)
+        # Convert coduni to string and strip any whitespace and leading zeros
+        coduni_str = str(coduni)if coduni is not None else ""
         
-        # Convert coduni to string and strip any whitespace
-        coduni_str = str(coduni).strip() if coduni is not None else ""
+        # Extract the first two digits of uf_code if it's longer
+        uf_prefix = str(uf_code)[:2] if uf_code and len(str(uf_code)) >= 2 else None
         
-        # Strip leading zeros from the coduni value
-        coduni_stripped = coduni_str.lstrip('0')
+        if not coduni_str or not uf_prefix:
+            return str(coduni)
         
-        # Try to find the mapping with the stripped value first
-        if coduni_stripped in mapping:
-            cnpj = mapping[coduni_stripped]
-        else:
-            # If not found with stripped value, try with the original value
-            cnpj = mapping.get(coduni_str, coduni_str)
+        # Connect to the database
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
         
-        # Clean the CNPJ by removing slashes, hyphens, and periods
-        if cnpj:
-            for char in ['/', '-', '.']:
-                cnpj = cnpj.replace(char, '')
-        
-        return cnpj
+        # Convert uf_prefix to integer for the query
+        try:
+            uf_prefix_int = int(uf_prefix)
+            
+            # Direct query for the exact match of code and state_code
+            cursor.execute(
+                "SELECT normalized_tax FROM codes WHERE code = ? AND state_code = ? AND range = '9407-9910'", 
+                (coduni_str, uf_prefix_int)
+            )
+            result = cursor.fetchone()
+            
+            # If no exact match, try with just the code
+            if not result:
+                print(f"No match with state code, trying with just code: {coduni_str}")
+                cursor.execute(
+                    "SELECT normalized_tax FROM codes WHERE code = ? AND range = '9407-9910'", 
+                    (coduni_str,)
+                )
+                result = cursor.fetchone()
+            
+            # Close the connection
+            conn.close()
+            
+            # Return the normalized_tax if found, otherwise return the original coduni
+            if result and result[0]:
+                return result[0]
+            else:
+                return str(coduni)
+                
+        except ValueError:
+            # If uf_prefix can't be converted to int, just return the original coduni
+            conn.close()
+            return str(coduni)
+            
     except Exception as e:
-        logging.error(f"Error in prepara_coduni_to_cnpj: {e}")
+        logging.error(f"Error in prepara_coduni_to_cnpj: {e}", exc_info=True)
         # Return the original coduni if there's an error
-        return coduni
-    
+        return str(coduni)
+
+
 def prepare_es_doc(record, index_name, fields_to_include=COLUNS_TO_WATCH_PA_94_99):
     """Prepare a document for Elasticsearch by cleaning and transforming data."""
     # Step 1: Clean the record by preprocessing columns
@@ -324,7 +281,9 @@ def prepare_es_doc(record, index_name, fields_to_include=COLUNS_TO_WATCH_PA_94_9
 
     # Step 5: Handle CNPJCPF - Convert PA_CODUNI to CNPJ
     pa_coduni = cleaned_record.get("PA_CODUNI", "")
-    cleaned_record["CNPJ_CPF"] = prepara_coduni_to_cnpj(pa_coduni)
+    pa_ufmun = cleaned_record.get("PA_UFMUN", "")  # Get the state code from PA_UFMUN
+    cleaned_record["CNPJ_CPF"] = prepara_coduni_to_cnpj(pa_coduni, pa_ufmun)
+
 
     # Step 7: Handle Source
     cleaned_record["SOURCE"] = 'SIA'
