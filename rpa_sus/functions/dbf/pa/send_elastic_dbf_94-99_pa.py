@@ -179,82 +179,124 @@ def handle_data_conversion_pa_94_99(date_value):
         # If conversion fails, return None
         return None
 
+# Initialize the global cache dictionary
+coduni_to_cnpj_map = {}
 
-def prepara_coduni_to_cnpj(coduni, uf_code):
-    """Convert PA_CODUNI to CNPJ by directly querying the database.
+def prepara_coduni_to_cnpj(uf_code):
+    global coduni_to_cnpj_map  # Properly reference the global variable inside the function
     
-    This function queries the database to find the normalized_tax (CNPJ) 
-    for the given coduni and state_code (from uf_code).
-    
-    Args:
-        coduni: The PA_CODUNI code to convert
-        uf_code: State code in format like 410690
-        
-    Returns:
-        str: The corresponding CNPJ_CPF if found, otherwise the original coduni
-    """
     try:
         import sqlite3
         DB_PATH = "/home/nicolas/Rpa_Sus_PA_IN/rpa_sus/data/codigos.db"
         
-        # Convert coduni to string and strip any whitespace and leading zeros
-        coduni_str = str(coduni)if coduni is not None else ""
-        
         # Extract the first two digits of uf_code if it's longer
         uf_prefix = str(uf_code)[:2] if uf_code and len(str(uf_code)) >= 2 else None
         
-        if not coduni_str or not uf_prefix:
-            return str(coduni)
-        
-        # Connect to the database
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        
+        if not uf_prefix:
+            return None
+            
         # Convert uf_prefix to integer for the query
         try:
             uf_prefix_int = int(uf_prefix)
             
-            # Direct query for the exact match of code and state_code
-            cursor.execute(
-                "SELECT normalized_tax FROM codes WHERE code = ? AND state_code = ? AND range = '9407-9910'", 
-                (coduni_str, uf_prefix_int)
-            )
-            result = cursor.fetchone()
+            # Connect to the database
+            conn = sqlite3.connect(DB_PATH)
+            cursor = conn.cursor()
             
-            # If no exact match, try with just the code
-            if not result:
-                print(f"No match with state code, trying with just code: {coduni_str}")
-                cursor.execute(
-                    "SELECT normalized_tax FROM codes WHERE code = ? AND range = '9407-9910'", 
-                    (coduni_str,)
-                )
-                result = cursor.fetchone()
+            # Get all the data for the state
+            cursor.execute(
+                "SELECT code, normalized_tax FROM codes WHERE state_code = ? AND range = '9407-9910'", 
+                (uf_prefix_int,)
+            )
+            result = cursor.fetchall()
             
             # Close the connection
             conn.close()
             
-            # Return the normalized_tax if found, otherwise return the original coduni
-            if result and result[0]:
-                return result[0]
-            else:
-                return str(coduni)
+            # Update the cache dictionary with the result
+            if result:
+                # Store the result in the map
+                temp_dict = dict(result)
+                # Create a reverse mapping as well (value -> key)
+                reverse_dict = {v: k for k, v in temp_dict.items()}
                 
-        except ValueError:
-            # If uf_prefix can't be converted to int, just return the original coduni
-            conn.close()
-            return str(coduni)
-            
-    except Exception as e:
-        logging.error(f"Error in prepara_coduni_to_cnpj: {e}", exc_info=True)
-        # Return the original coduni if there's an error
-        return str(coduni)
+                # Combine both mappings for maximum flexibility
+                combined_dict = {**temp_dict}
+                
+                # Add the reverse mappings only if they don't conflict with existing keys
+                for k, v in reverse_dict.items():
+                    if k not in combined_dict:
+                        combined_dict[k] = v
+                
+                coduni_to_cnpj_map[uf_prefix_int] = combined_dict
+                return result
+            else:
+                print(f"No mapping found for state code {uf_prefix_int}")
+                return None
+                
+        except sqlite3.Error as error:
+            print(f"SQLite error: {error}")
+            return None
+    except ValueError:
+        print(f"Invalid uf_code: {uf_code}")
+        return None
 
+def get_cnpj_from_coduni(uf_code, coduni):
+    """Retrieve the CNPJ from the CODUNI field with a simpler approach."""
+    global coduni_to_cnpj_map
+    
+    # Convert coduni to string
+    coduni_str = str(coduni).strip() if coduni else None
+    
+    if not coduni_str:
+        return None
+    
+    # Extract the first two digits of uf_code
+    uf_prefix = str(uf_code)[:2] if uf_code and len(str(uf_code)) >= 2 else None
+    
+    if not uf_prefix:
+        return None
+        
+    try:
+        uf_prefix_int = int(uf_prefix)
+        
+        # Check if we have this state code in our map
+        if uf_prefix_int not in coduni_to_cnpj_map:
+            print(f"State code {uf_prefix_int} not found in coduni_to_cnpj_map")
+            return None
+            
+        # Get the mapping dictionary for this state
+        state_mappings = coduni_to_cnpj_map[uf_prefix_int]
+        
+        # Direct lookup - if CODUNI is the key
+        if coduni_str in state_mappings:
+            return state_mappings[coduni_str]
+        
+        # If not found, return None
+        print(f"No CNPJ found for CODUNI: {coduni_str} in state {uf_prefix_int}")
+        return coduni_str
+        
+    except ValueError:
+        print(f"Invalid uf_code prefix: {uf_prefix}")
+        return None
+    
 
 def prepare_es_doc(record, index_name, fields_to_include=COLUNS_TO_WATCH_PA_94_99):
     """Prepare a document for Elasticsearch by cleaning and transforming data."""
     # Step 1: Clean the record by preprocessing columns
     cleaned_record = clean_column_data(record)
+    global coduni_to_cnpj_map  # Properly reference the global variable inside the function
 
+    # Step ?: Prepare coduni_to_cnpj
+    pa_ufmun = cleaned_record.get("PA_UFMUN", "")  # Get the state code from PA_UFMUN
+    
+    # Extract the first two digits of uf_code if it's longer
+    uf_prefix = str(pa_ufmun)[:2] if pa_ufmun and len(str(pa_ufmun)) >= 2 else None
+    
+    if uf_prefix and int(uf_prefix) not in coduni_to_cnpj_map:
+        logging.info(f"Preparing coduni_to_cnpj for state code {pa_ufmun}")
+        prepara_coduni_to_cnpj(pa_ufmun)
+        
     # Step 2: Filter the record to include only specified fields (optional)
     if fields_to_include:
         cleaned_record = {
@@ -282,8 +324,7 @@ def prepare_es_doc(record, index_name, fields_to_include=COLUNS_TO_WATCH_PA_94_9
     # Step 5: Handle CNPJCPF - Convert PA_CODUNI to CNPJ
     pa_coduni = cleaned_record.get("PA_CODUNI", "")
     pa_ufmun = cleaned_record.get("PA_UFMUN", "")  # Get the state code from PA_UFMUN
-    cleaned_record["CNPJ_CPF"] = prepara_coduni_to_cnpj(pa_coduni, pa_ufmun)
-
+    cleaned_record["CNPJ_CPF"] = get_cnpj_from_coduni(pa_ufmun, pa_coduni)
 
     # Step 7: Handle Source
     cleaned_record["SOURCE"] = 'SIA'
@@ -415,12 +456,12 @@ def process_chunk(data_chunk, index_name, chunk_index, dbf_file):
             exc_info=True
         )
         return 0
-        return 0
 
 
 def parallel_bulk_index(dbf_directory):
     start_time = time.time()
     logging.info("Starting parallel indexing process.")
+    global coduni_to_cnpj_map # Initialize map for CNPJ-CPF conversion
 
     total_processed = 0
     total_files = 0
@@ -514,6 +555,8 @@ def parallel_bulk_index(dbf_directory):
 
         # Clear memory after processing the batch
         clear_memory()
+        # Clear CNPJ-CPF conversion map to free up memory
+        coduni_to_cnpj_map.clear()
 
         # Log progress after each batch
         current_elapsed = time.time() - start_time
