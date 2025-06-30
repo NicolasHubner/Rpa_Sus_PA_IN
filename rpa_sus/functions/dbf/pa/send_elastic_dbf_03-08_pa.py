@@ -149,11 +149,23 @@ def get_mapped_name_state(code, mapping, default="Unknown"):
         return default
 
 def handle_date_conversion(date_value):
-    """Helper function to convert date to yyyyMM format."""
+    """
+    Convert a date value in YYYYMM format to YYYY-MM-DDTHH:MM:SS format.
+    
+    Args:
+        date_value: A date in YYYYMM format (as int or string)
+        
+    Returns:
+        str: Date in YYYY-MM-DDTHH:MM:SS format, or None if conversion fails
+    """
     try:
-        # Assuming date_value is in the format YYYYMM or a valid integer
-        return datetime.strptime(str(date_value), "%Y%m").strftime("%Y%m")
-    except ValueError:
+        # Convert to string and ensure proper length
+        date_str = str(date_value).zfill(6)
+        # Parse the date and set day to 15th of the month
+        dt = datetime.strptime(date_str, "%Y%m").replace(day=15)
+        # Format to the desired output
+        return dt.strftime("%Y-%m-%dT%H:%M:%S")
+    except (ValueError, TypeError):
         return None
 
 
