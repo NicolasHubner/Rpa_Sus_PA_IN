@@ -43,7 +43,7 @@ logging.getLogger("elastic_transport.node_pool").setLevel(logging.ERROR)
 # If you're using urllib3 with verify=False, also suppress these warnings
 warnings.simplefilter('ignore', InsecureRequestWarning)
 
-dbf_directory = '/mnt/volume_nyc1_01/nicolas/pa_94-99'
+dbf_directory = '/mnt/volume_nyc1_01/nicolas/pa_99-03'
 
 INT_CHUNK_SIZE = int(CHUNK_SIZE)
 
@@ -148,37 +148,14 @@ def get_mapped_name_state(code, mapping, default="Unknown"):
     except ValueError:
         return default
 
-def handle_data_conversion_pa_94_99(date_value):
-    """Handle data conversion for PA_DATPR and PA_DATREF fields in PA_94_99 format."""
+def handle_date_conversion(date_value):
+    """Helper function to convert date to yyyyMM format."""
     try:
-        # Convert to string if it's not already
-        date_str = str(date_value).strip()
-
-        # Check if the date is in YYMM format (4 digits)
-        if len(date_str) == 4:
-            year = int(date_str[:2])
-            month = int(date_str[2:])
-
-            # Assume years < 50 are 2000s, years >= 50 are 1900s
-            if year < 50:
-                year += 2000
-            else:
-                year += 1900
-
-            # Ensure the month is valid (1-12)
-            if 1 <= month <= 12:
-                # Create a datetime object for the first day of the given year and month
-                date_value = datetime(year, month, 1)
-                # Format the date as ISO 8601 format which Elasticsearch can parse
-                formatted_date = date_value.strftime("%Y-%m-%dT00:00:00")
-                return formatted_date
-            else:
-                return None
-        else:
-            return None
-    except (ValueError, TypeError):
-        # If conversion fails, return None
+        # Assuming date_value is in the format YYYYMM or a valid integer
+        return datetime.strptime(str(date_value), "%Y%m").strftime("%Y%m")
+    except ValueError:
         return None
+
 
 # Initialize the global cache dictionary
 coduni_to_cnpj_map = {}
@@ -306,7 +283,7 @@ def prepare_es_doc(record, index_name, fields_to_include=COLUNS_TO_WATCH_PA_94_9
     # Step 3: Handle PA_CMP conversion to yyyyMM format
     pa_datpr = cleaned_record.get("PA_DATPR", "")
     if pa_datpr:
-        date_value = handle_data_conversion_pa_94_99(pa_datpr)
+        date_value = handle_date_conversion(pa_datpr)
         if date_value:
             # Use the datetime value
             formatted_date = date_value  # Format as needed
