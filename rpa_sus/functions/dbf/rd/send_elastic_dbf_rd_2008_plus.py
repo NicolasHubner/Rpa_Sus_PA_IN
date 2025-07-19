@@ -152,7 +152,7 @@ def handle_data_conversion_rd_97_03(ANO, MES):
         # Ensure the month is valid (1-12)
         if 1 <= mes_cmpt <= 12:
             # Create a datetime object for the first day of the given year and month
-            date_value = datetime(ano_cmpt, mes_cmpt, 1)
+            date_value = datetime(ano_cmpt, mes_cmpt, 15)  # Use 15th as a placeholder for the day
             # Format the date as ISO 8601 format which Elasticsearch can parse
             formatted_date = date_value.strftime("%Y-%m-%dT00:00:00")
             return formatted_date
