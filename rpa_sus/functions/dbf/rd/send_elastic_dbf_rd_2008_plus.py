@@ -41,7 +41,7 @@ logging.getLogger("elastic_transport.node_pool").setLevel(logging.ERROR)
 # If you're using urllib3 with verify=False, also suppress these warnings
 warnings.simplefilter('ignore', InsecureRequestWarning)
 
-dbf_directory = '/mnt/volume_nyc1_01/nicolas/rd-2008-plus'
+dbf_directory = '/mnt/volume_nyc1_01/nicolas/RD_2008+'
 
 INT_CHUNK_SIZE = int(CHUNK_SIZE)
 
