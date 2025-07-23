@@ -349,7 +349,6 @@ def process_chunk(data_chunk, index_name, chunk_index, dbf_file):
 def parallel_bulk_index(dbf_directory):
     start_time = time.time()
     logging.info("Starting parallel indexing process.")
-    global coduni_to_cnpj_map # Initialize map for CNPJ-CPF conversion
 
     total_processed = 0
     total_files = 0
@@ -444,7 +443,6 @@ def parallel_bulk_index(dbf_directory):
         # Clear memory after processing the batch
         clear_memory()
         # Clear CNPJ-CPF conversion map to free up memory
-        coduni_to_cnpj_map.clear()
 
         # Log progress after each batch
         current_elapsed = time.time() - start_time
