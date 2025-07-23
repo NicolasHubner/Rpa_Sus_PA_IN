@@ -43,8 +43,7 @@ logging.getLogger("elastic_transport.node_pool").setLevel(logging.ERROR)
 # If you're using urllib3 with verify=False, also suppress these warnings
 warnings.simplefilter('ignore', InsecureRequestWarning)
 
-# dbf_directory = '/mnt/volume_nyc1_01/nicolas/pa_03-08'
-dbf_directory = '/home/nicolas_ubuntu/Rpa_Sus_PA_IN/rpa_sus/data/pa'
+dbf_directory = '/mnt/volume_nyc1_01/nicolas/PA/Ceara'
 
 INT_CHUNK_SIZE = int(CHUNK_SIZE)
 
@@ -495,7 +494,7 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         logging.warning("Process interrupted by user. Finishing up...")
     except Exception as e:
-        logging.error(f"Unexpected error EXECPTION ERROR RONALDO",)
+        logging.error(f"Unexpected error EXECPTION ERROR RONALDO: {e}", exc_info=True)
     finally:
         logging.info("Script execution has ended.")
         # Optionally, you can add a cleanup function here if needed
