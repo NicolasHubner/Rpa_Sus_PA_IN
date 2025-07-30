@@ -316,18 +316,38 @@ def process_chunk(data_chunk, index_name, chunk_index, dbf_file):
         failed_documents = 0
 
         # Use a smaller chunk size for streaming_bulk to avoid memory issues
-        streaming_chunk_size = min(2500, INT_CHUNK_SIZE)
+        streaming_chunk_size = min(500, INT_CHUNK_SIZE)
 
         start_time = time.time()
 
+        # Add delay before processing to avoid 429 errors
+        delay = random.uniform(0.5, 2.0)  # Random delay between 0.5 and 2 seconds
+        time.sleep(delay)
+
         # Use helpers.bulk instead of streaming_bulk for better handling of document IDs
-        success, failed = helpers.bulk(
-            client=es_client,
-            actions=actions,
-            chunk_size=streaming_chunk_size,
-            max_retries=MAX_RETRIES,
-            stats_only=True  # Return only success/failed counts
-        )
+        try:
+            success, failed = helpers.bulk(
+                client=es_client,
+                actions=actions,
+                chunk_size=streaming_chunk_size,
+                max_retries=MAX_RETRIES,
+                stats_only=True  # Return only success/failed counts
+            )
+        except exceptions.ConnectionError as e:
+            if "429" in str(e) or "Too Many Requests" in str(e):
+                # Handle 429 specifically with longer delay
+                logging.warning(f"Rate limited (429), sleeping for 10 seconds before retry...")
+                time.sleep(10)
+                # Retry once more
+                success, failed = helpers.bulk(
+                    client=es_client,
+                    actions=actions,
+                    chunk_size=streaming_chunk_size//2,  # Use smaller chunk size
+                    max_retries=MAX_RETRIES,
+                    stats_only=True
+                )
+            else:
+                raise
 
         success_count = success
         failed_documents = failed
@@ -335,6 +355,9 @@ def process_chunk(data_chunk, index_name, chunk_index, dbf_file):
         duration = time.time() - start_time
         logging.info(
             f"Chunk {chunk_index} complete: {success_count} indexed, {failed_documents} failed in {duration:.2f}s")
+
+        # Add a small delay after processing to prevent overwhelming ES
+        time.sleep(0.1)
 
         return success_count
 
@@ -374,11 +397,12 @@ def parallel_bulk_index(dbf_directory):
     total_memory_gb = psutil.virtual_memory().total / (1024 * 1024 * 1024)
     cpu_count = os.cpu_count() or 1
 
-    # Allocate ~1GB per worker, but cap at CPU count or 8, whichever is lower
-    optimal_workers = min(int(total_memory_gb / 1.5), cpu_count, NUM_PROCESSES)
+    # Be more conservative with workers to avoid 429 errors
+    # Allocate ~1GB per worker, but cap at CPU count/2 or 4, whichever is lower
+    optimal_workers = min(int(total_memory_gb / 2), cpu_count // 2, 4)
 
-    # Use at least 1 worker, but no more than 8
-    worker_count = max(1, min(optimal_workers, NUM_PROCESSES))
+    # Use at least 1 worker, but no more than 4 to prevent ES overload
+    worker_count = max(1, min(optimal_workers, 4))
 
     logging.info(
         f"System has {cpu_count} CPUs and {total_memory_gb:.1f}GB RAM")
@@ -418,6 +442,12 @@ def parallel_bulk_index(dbf_directory):
                         future = executor.submit(
                             process_chunk_with_retry, data_chunk, index_name, chunk_index, dbf_file)
                         futures.append(future)
+                        
+                        # Add delay between chunk submissions to avoid overwhelming ES
+                        if file_chunks % 5 == 0:  # Every 5 chunks, add a longer delay
+                            time.sleep(1.0)
+                        else:
+                            time.sleep(0.2)  # Small delay between submissions
 
                     logging.info(
                         f"Submitted {file_chunks} chunks for processing from file {dbf_file}")
@@ -434,6 +464,9 @@ def parallel_bulk_index(dbf_directory):
                                 f"An error occurred during chunk processing: {exc}")
 
                     logging.info(f"Completed processing file {dbf_file}: {file_processed} records indexed")
+
+                # Add delay between files to prevent ES overload
+                time.sleep(2.0)
 
             except Exception as e:
                 failed_files += 1
