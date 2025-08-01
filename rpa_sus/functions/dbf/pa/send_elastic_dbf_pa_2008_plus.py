@@ -397,12 +397,11 @@ def parallel_bulk_index(dbf_directory):
     total_memory_gb = psutil.virtual_memory().total / (1024 * 1024 * 1024)
     cpu_count = os.cpu_count() or 1
 
-    # Be more conservative with workers to avoid 429 errors
-    # Allocate ~1GB per worker, but cap at CPU count/2 or 4, whichever is lower
-    optimal_workers = min(int(total_memory_gb / 2), cpu_count // 2, 4)
+    # Allocate ~1GB per worker, but cap at CPU count or 8, whichever is lower
+    optimal_workers = min(int(total_memory_gb / 1.5), cpu_count, NUM_PROCESSES)
 
-    # Use at least 1 worker, but no more than 4 to prevent ES overload
-    worker_count = max(1, min(optimal_workers, 4))
+    # Use at least 1 worker, but no more than 8
+    worker_count = max(1, min(optimal_workers, NUM_PROCESSES))
 
     logging.info(
         f"System has {cpu_count} CPUs and {total_memory_gb:.1f}GB RAM")
