@@ -47,6 +47,9 @@ dbf_directory = '/mnt/volume_nyc1_01/nicolas/PA/Ceara'
 
 INT_CHUNK_SIZE = int(CHUNK_SIZE)
 
+# Enable detailed error analysis (set to False to reduce log verbosity)
+ENABLE_DETAILED_ERROR_ANALYSIS = True
+
 COLUNS_TO_WATCH_PA_2008_PLUS = [
     "PA_CODUNI",
     "PA_GESTAO",
@@ -173,6 +176,141 @@ def handle_date_conversion(date_value):
         return dt.strftime("%Y-%m-%dT%H:%M:%S")
     except (ValueError, TypeError):
         return None
+
+
+def save_failed_documents_sample(errors, chunk_index, dbf_file, actions):
+    """Save a sample of failed documents to a file for analysis."""
+    try:
+        import json
+        from datetime import datetime
+        
+        # Create a filename with timestamp
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"failed_docs_{dbf_file}_{chunk_index}_{timestamp}.json"
+        filepath = os.path.join(os.path.dirname(__file__), 'error_logs', filename)
+        
+        # Create directory if it doesn't exist
+        os.makedirs(os.path.dirname(filepath), exist_ok=True)
+        
+        # Collect failed document info
+        failed_docs_info = []
+        
+        for error in errors[:10]:  # Save first 10 failed documents
+            doc_id = error.get('index', {}).get('_id', 'unknown')
+            error_info = error.get('index', {}).get('error', {})
+            
+            # Find the corresponding document in actions
+            failed_doc = None
+            for action in actions:
+                if action.get('_id') == doc_id:
+                    failed_doc = action.get('_source', {})
+                    break
+            
+            failed_docs_info.append({
+                'document_id': doc_id,
+                'error_type': error_info.get('type', 'unknown'),
+                'error_reason': error_info.get('reason', 'unknown'),
+                'error_status': error.get('index', {}).get('status', 'unknown'),
+                'document_data': failed_doc
+            })
+        
+        # Save to file
+        with open(filepath, 'w', encoding='utf-8') as f:
+            json.dump({
+                'file': dbf_file,
+                'chunk': chunk_index,
+                'timestamp': timestamp,
+                'total_errors': len(errors),
+                'failed_documents_sample': failed_docs_info
+            }, f, indent=2, ensure_ascii=False)
+        
+        logging.info(f"Failed documents sample saved to: {filepath}")
+        
+    except Exception as e:
+        logging.error(f"Failed to save failed documents sample: {str(e)}")
+
+
+def analyze_bulk_errors(errors, chunk_index, dbf_file):
+    """Analyze and categorize bulk indexing errors."""
+    error_summary = {}
+    sample_errors = []
+    
+    for error in errors:
+        error_info = error.get('index', {}).get('error', {})
+        error_type = error_info.get('type', 'unknown')
+        error_reason = error_info.get('reason', 'unknown')
+        
+        # Categorize errors
+        if error_type not in error_summary:
+            error_summary[error_type] = {
+                'count': 0,
+                'sample_reason': error_reason,
+                'sample_doc_id': error.get('index', {}).get('_id', 'unknown')
+            }
+        error_summary[error_type]['count'] += 1
+        
+        # Keep sample errors for detailed logging
+        if len(sample_errors) < 3:
+            sample_errors.append({
+                'type': error_type,
+                'reason': error_reason,
+                'doc_id': error.get('index', {}).get('_id', 'unknown'),
+                'status': error.get('index', {}).get('status', 'unknown')
+            })
+    
+    # Log error summary
+    logging.error(f"Error Analysis for chunk {chunk_index} in file '{dbf_file}':")
+    logging.error(f"Total errors: {len(errors)}")
+    
+    for error_type, info in error_summary.items():
+        logging.error(f"  {error_type}: {info['count']} occurrences")
+        logging.error(f"    Sample reason: {info['sample_reason']}")
+        logging.error(f"    Sample doc ID: {info['sample_doc_id']}")
+    
+    # Log detailed sample errors
+    logging.error("Sample detailed errors:")
+    for i, error in enumerate(sample_errors):
+        logging.error(f"  Error {i+1}: [Status: {error['status']}] {error['type']}: {error['reason']}")
+        logging.error(f"    Document ID: {error['doc_id']}")
+    
+    return error_summary
+
+
+def validate_document(doc):
+    """Validate a document before indexing to catch common issues."""
+    try:
+        source = doc.get('_source', {})
+        
+        # Check for required fields
+        required_fields = ['PA_CODUNI', 'PA_UFMUN']
+        for field in required_fields:
+            if field not in source or source[field] is None or source[field] == '':
+                return False, f"Missing or empty required field: {field}"
+        
+        # Check for document size (Elasticsearch has a 100MB limit per document)
+        import json
+        doc_size = len(json.dumps(source).encode('utf-8'))
+        if doc_size > 50 * 1024 * 1024:  # 50MB warning threshold
+            return False, f"Document too large: {doc_size} bytes"
+        
+        # Check for field value lengths (some fields might be too long)
+        for key, value in source.items():
+            if value is not None and isinstance(value, str) and len(value) > 32766:
+                return False, f"Field '{key}' value too long: {len(value)} characters"
+        
+        # Check for valid numeric fields
+        numeric_fields = ['PA_QTDPRO', 'PA_QTDAPR', 'PA_VALPRO', 'PA_VALAPR', 'VAL_GERAL']
+        for field in numeric_fields:
+            if field in source and source[field] is not None:
+                try:
+                    float(source[field])
+                except (ValueError, TypeError):
+                    return False, f"Invalid numeric value in field '{field}': {source[field]}"
+        
+        return True, "Valid"
+        
+    except Exception as e:
+        return False, f"Validation error: {str(e)}"
 
 
 def prepare_es_doc(record, index_name, fields_to_include=COLUNS_TO_WATCH_PA_2008_PLUS):
@@ -304,9 +442,33 @@ def process_chunk(data_chunk, index_name, chunk_index, dbf_file):
                 f"Chunk {chunk_index} for file '{dbf_file}' has no valid records, skipping")
             return 0
 
-        # Create actions with unique document IDs
-        actions = list(prepare_es_doc(record, index_name)
-                       for record in valid_records)
+        # Create actions with unique document IDs and validate them
+        actions = []
+        validation_errors = 0
+        
+        for record in valid_records:
+            try:
+                doc = prepare_es_doc(record, index_name)
+                
+                # Validate the document before adding to actions
+                is_valid, validation_msg = validate_document(doc)
+                if is_valid:
+                    actions.append(doc)
+                else:
+                    validation_errors += 1
+                    if validation_errors <= 3:  # Log first 3 validation errors
+                        logging.warning(f"Document validation failed in chunk {chunk_index}: {validation_msg}")
+                        logging.warning(f"Problematic record sample: {str(record)[:200]}...")
+                    
+            except Exception as e:
+                validation_errors += 1
+                if validation_errors <= 3:
+                    logging.error(f"Error preparing document in chunk {chunk_index}: {str(e)}")
+                    logging.error(f"Problematic record: {str(record)[:200]}...")
+        
+        if validation_errors > 0:
+            logging.warning(f"Chunk {chunk_index}: {validation_errors} documents failed validation and were skipped")
+        
         chunk_size = len(actions)
 
         logging.info(
@@ -326,31 +488,78 @@ def process_chunk(data_chunk, index_name, chunk_index, dbf_file):
 
         # Use helpers.bulk instead of streaming_bulk for better handling of document IDs
         try:
-            success, failed = helpers.bulk(
+            # Use stats_only=False to get detailed error information
+            results = helpers.bulk(
                 client=es_client,
                 actions=actions,
                 chunk_size=streaming_chunk_size,
                 max_retries=MAX_RETRIES,
-                stats_only=True  # Return only success/failed counts
+                stats_only=False  # Get detailed results including errors
             )
+            
+            # Extract success and failed counts from results
+            success_count = results[0]
+            failed_documents = len(results[1]) if results[1] else 0
+            
+            # Log detailed error information if there are failures
+            if failed_documents > 0:
+                logging.error(f"Chunk {chunk_index} for file '{dbf_file}': {failed_documents} documents failed to index")
+                for i, error_doc in enumerate(results[1][:5]):  # Log first 5 errors
+                    error_info = error_doc.get('index', {})
+                    error_reason = error_info.get('error', {})
+                    logging.error(f"Error {i+1}: {error_reason}")
+                    if hasattr(error_doc, '_source'):
+                        logging.error(f"Failed document sample: {str(error_doc.get('_source', {}))[:200]}...")
+                
+                if len(results[1]) > 5:
+                    logging.error(f"... and {len(results[1]) - 5} more errors")
+            
+        except helpers.BulkIndexError as e:
+            # Handle BulkIndexError specifically to extract detailed error information
+            logging.error(f"BulkIndexError in chunk {chunk_index} for file '{dbf_file}': {str(e)}")
+            
+            # Extract error details from the exception
+            if hasattr(e, 'errors') and e.errors:
+                # Use our analysis function to categorize and log errors
+                error_summary = analyze_bulk_errors(e.errors, chunk_index, dbf_file)
+                
+                # Additional specific error checks
+                mapping_errors = error_summary.get('mapper_parsing_exception', {}).get('count', 0)
+                if mapping_errors > 0:
+                    logging.error(f"Mapping errors detected: {mapping_errors}. This usually indicates data type mismatches.")
+                
+                version_conflicts = error_summary.get('version_conflict_engine_exception', {}).get('count', 0)
+                if version_conflicts > 0:
+                    logging.error(f"Version conflicts detected: {version_conflicts}. This might indicate duplicate document IDs.")
+                
+                resource_errors = error_summary.get('es_rejected_execution_exception', {}).get('count', 0)
+                if resource_errors > 0:
+                    logging.error(f"Resource/queue errors detected: {resource_errors}. Elasticsearch might be overloaded.")
+            
+            # Return 0 for failed processing
+            return 0
+            
         except exceptions.ConnectionError as e:
             if "429" in str(e) or "Too Many Requests" in str(e):
                 # Handle 429 specifically with longer delay
                 logging.warning(f"Rate limited (429), sleeping for 10 seconds before retry...")
                 time.sleep(10)
                 # Retry once more
-                success, failed = helpers.bulk(
-                    client=es_client,
-                    actions=actions,
-                    chunk_size=streaming_chunk_size//2,  # Use smaller chunk size
-                    max_retries=MAX_RETRIES,
-                    stats_only=True
-                )
+                try:
+                    results = helpers.bulk(
+                        client=es_client,
+                        actions=actions,
+                        chunk_size=streaming_chunk_size//2,  # Use smaller chunk size
+                        max_retries=MAX_RETRIES,
+                        stats_only=False
+                    )
+                    success_count = results[0]
+                    failed_documents = len(results[1]) if results[1] else 0
+                except helpers.BulkIndexError as retry_e:
+                    logging.error(f"BulkIndexError on retry: {str(retry_e)}")
+                    return 0
             else:
                 raise
-
-        success_count = success
-        failed_documents = failed
 
         duration = time.time() - start_time
         logging.info(
