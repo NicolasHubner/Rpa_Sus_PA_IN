@@ -91,8 +91,8 @@ services:
       - xpack.security.transport.ssl.verification_mode=certificate
       - xpack.license.self_generated.type=trial
       - xpack.ml.use_auto_machine_memory_percent=true
-      - ES_JAVA_OPTS=-Xms3g -Xmx3g
-    mem_limit: 6442450944
+      - ES_JAVA_OPTS=-Xms4g -Xmx4g
+    mem_limit: 8589934592 # 8GB for better memory handling
     ulimits:
       memlock:
         soft: -1
@@ -133,8 +133,8 @@ services:
       - xpack.security.transport.ssl.verification_mode=certificate
       - xpack.license.self_generated.type=trial
       - xpack.ml.use_auto_machine_memory_percent=true
-      - ES_JAVA_OPTS=-Xms3g -Xmx3g
-    mem_limit: 6442450944
+      - ES_JAVA_OPTS=-Xms4g -Xmx4g
+    mem_limit: 8589934592 # 8GB for better memory handling
     ulimits:
       memlock:
         soft: -1
@@ -175,8 +175,8 @@ services:
       - xpack.security.transport.ssl.verification_mode=certificate
       - xpack.license.self_generated.type=trial
       - xpack.ml.use_auto_machine_memory_percent=true
-      - ES_JAVA_OPTS=-Xms3g -Xmx3g
-    mem_limit: 6442450944
+      - ES_JAVA_OPTS=-Xms4g -Xmx4g
+    mem_limit: 8589934592 # 8GB for better memory handling
     ulimits:
       memlock:
         soft: -1
@@ -211,7 +211,7 @@ services:
       - ELASTICSEARCH_USERNAME=kibana_system
       - ELASTICSEARCH_PASSWORD=nicolasprojetoflavio22
       - ELASTICSEARCH_SSL_CERTIFICATEAUTHORITIES=config/certs/ca/ca.crt
-    mem_limit: 4294967296
+    mem_limit: 6442450944 # 6GB for better performance
     healthcheck:
       test:
         [
