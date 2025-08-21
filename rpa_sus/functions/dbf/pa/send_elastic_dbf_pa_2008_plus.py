@@ -8,6 +8,7 @@ sys.path.insert(0, project_root)
 
 import logging
 import time
+import threading
 from urllib3.exceptions import InsecureRequestWarning
 import warnings
 from tenacity import retry, stop_after_attempt, wait_exponential
@@ -72,6 +73,10 @@ COLUNS_TO_WATCH_PA_2008_PLUS = [
 
 # Initialize global counter to track processed records
 processed_records_count = 0
+
+# Global set to track created indices (to avoid recreating them)
+created_indices = set()
+indices_lock = threading.Lock()
 
 MAX_BACKOFF = 60  # Maximum backoff time in seconds
 
@@ -358,71 +363,143 @@ def prepare_es_doc(record, index_name, fields_to_include=COLUNS_TO_WATCH_PA_2008
     }
 
 
-def ensure_index_exists(index_name: str):
-    try:
-        # Check if the index exists
-        if not es_client.indices.exists(index=index_name):
-            # If it doesn't exist, try to create it
-            es_client.indices.create(
-                index=index_name,
-                body={
-                    "settings": {
-                        "number_of_shards": 3,  # Adjust based on your cluster size
-                        "number_of_replicas": 1,  # Adjust based on your needs
-                        "refresh_interval": "30s",  # Reduce refresh frequency during bulk indexing
-                        "translog": {
-                            "durability": "async",  # Async translog for better performance
-                            "sync_interval": "30s"
-                        }
-                    },
-                    "mappings": {
-                        "properties": {
-                            "PA_CODUNI": {"type": "keyword"},
-                            "PA_GESTAO": {"type": "keyword"},
-                            "PA_UFMUN": {"type": "keyword"},
-                            "PA_CNPJCPF": {"type": "keyword"},
-                            "PA_CNPJMNT": {"type": "keyword"},
-                            "PA_MVM": {"type": "keyword"},
-                            "PA_CMP": {"type": "keyword"},
-                            "PA_PROC_ID": {"type": "keyword"},
-                            "PA_TPFIN": {"type": "keyword"},
-                            "PA_SUBFIN": {"type": "keyword"},
-                            "PA_CBOCOD": {"type": "keyword"},
-                            "PA_CIDPRI": {"type": "keyword"},
-                            "PA_CODPRO": {"type": "keyword"},
-                            "PA_QTDPRO": {"type": "integer"},
-                            "PA_QTDAPR": {"type": "integer"},
-                            "PA_VALPRO": {"type": "float"},
-                            "PA_VALAPR": {"type": "float"},
+def safe_ensure_index_exists(index_name: str):
+    """
+    Thread-safe wrapper for ensuring index exists.
+    Uses a global set to track created indices and avoid redundant creation attempts.
+    """
+    with indices_lock:
+        if index_name in created_indices:
+            logging.debug(f"Index '{index_name}' already confirmed to exist.")
+            return True
+            
+        try:
+            result = ensure_index_exists(index_name)
+            if result:
+                created_indices.add(index_name)
+                logging.info(f"Index '{index_name}' added to created indices cache.")
+            return result
+        except Exception as e:
+            logging.error(f"Failed to ensure index '{index_name}' exists: {e}")
+            # Check if the index exists despite the error
+            try:
+                if es_client.indices.exists(index=index_name):
+                    logging.info(f"Index '{index_name}' exists despite creation error.")
+                    created_indices.add(index_name)
+                    return True
+            except Exception as verify_error:
+                logging.error(f"Failed to verify index existence: {verify_error}")
+            raise
 
-                            "@DATA": {"type": "date"},
-                            "VAL_GERAL": {"type": "float"},
-                            "CNPJ_CPF": {"type": "keyword"},
-                            "SOURCE": {"type": "keyword"},
-                        }
+
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=8))
+def ensure_index_exists(index_name: str):
+    """
+    Ensure that an Elasticsearch index exists, with robust error handling.
+    Uses retry logic to handle race conditions and temporary failures.
+    """
+    try:
+        # Double-check if the index exists (with retry for potential race conditions)
+        if es_client.indices.exists(index=index_name):
+            logging.info(f"Index '{index_name}' already exists.")
+            return True
+        
+        # Add a small random delay to reduce race conditions in concurrent environments
+        time.sleep(random.uniform(0.1, 0.5))
+        
+        # Check one more time before creating (in case another process created it)
+        if es_client.indices.exists(index=index_name):
+            logging.info(f"Index '{index_name}' was created by another process.")
+            return True
+            
+        # Try to create the index
+        logging.info(f"Attempting to create index '{index_name}'...")
+        es_client.indices.create(
+            index=index_name,
+            body={
+                "settings": {
+                    "number_of_shards": 3,  # Adjust based on your cluster size
+                    "number_of_replicas": 1,  # Adjust based on your needs
+                    "refresh_interval": "30s",  # Reduce refresh frequency during bulk indexing
+                    "translog": {
+                        "durability": "async",  # Async translog for better performance
+                        "sync_interval": "30s"
+                    }
+                },
+                "mappings": {
+                    "properties": {
+                        "PA_CODUNI": {"type": "keyword"},
+                        "PA_GESTAO": {"type": "keyword"},
+                        "PA_UFMUN": {"type": "keyword"},
+                        "PA_CNPJCPF": {"type": "keyword"},
+                        "PA_CNPJMNT": {"type": "keyword"},
+                        "PA_MVM": {"type": "keyword"},
+                        "PA_CMP": {"type": "keyword"},
+                        "PA_PROC_ID": {"type": "keyword"},
+                        "PA_TPFIN": {"type": "keyword"},
+                        "PA_SUBFIN": {"type": "keyword"},
+                        "PA_CBOCOD": {"type": "keyword"},
+                        "PA_CIDPRI": {"type": "keyword"},
+                        "PA_CODPRO": {"type": "keyword"},
+                        "PA_QTDPRO": {"type": "integer"},
+                        "PA_QTDAPR": {"type": "integer"},
+                        "PA_VALPRO": {"type": "float"},
+                        "PA_VALAPR": {"type": "float"},
+
+                        "@DATA": {"type": "date"},
+                        "VAL_GERAL": {"type": "float"},
+                        "CNPJ_CPF": {"type": "keyword"},
+                        "SOURCE": {"type": "keyword"},
                     }
                 }
-            )
-            logging.info(f"Index '{index_name}' created successfully.")
-        else:
-            logging.info(f"Index '{index_name}' already exists.")
+            }
+        )
+        logging.info(f"Index '{index_name}' created successfully.")
+        return True
+        
     except exceptions.ConnectionError as ce:
         logging.error(f"Connection error while ensuring index exists: {ce}")
         raise
+        
     except exceptions.RequestError as re:
-        logging.error(f"Request error while ensuring index exists: {re}")
-        logging.error(f"Error info: {getattr(re, 'info', None)}")
-        logging.error(f"Error status: {getattr(re, 'status_code', None)}")
-        logging.error(f"Error body: {getattr(re, 'body', None)}")
-        raise
+        logging.warning(f"Request error while ensuring index exists: {re}")
+        
+        # Handle resource_already_exists_exception specifically
+        error_message = str(re).lower()
+        if 'resource_already_exists_exception' in error_message or 'already exists' in error_message:
+            logging.info(f"Index '{index_name}' already exists (caught resource_already_exists_exception).")
+            # Verify the index actually exists now
+            try:
+                if es_client.indices.exists(index=index_name):
+                    logging.info(f"Confirmed: Index '{index_name}' exists.")
+                    return True
+                else:
+                    logging.warning(f"Index '{index_name}' should exist but verification failed. Retrying...")
+                    raise re  # Trigger retry
+            except Exception as verify_error:
+                logging.error(f"Error verifying index existence: {verify_error}")
+                raise re  # Trigger retry
+        else:
+            # For other RequestError types, log details and re-raise
+            logging.error(f"Non-resource error - Error info: {getattr(re, 'info', 'N/A')}")
+            logging.error(f"Error status: {getattr(re, 'status_code', 'N/A')}")
+            raise
+            
     except exceptions.AuthenticationException as ae:
         logging.error(f"Authentication error: {ae}")
         raise
+        
     except exceptions.AuthorizationException as ae:
         logging.error(f"Authorization error: {ae}")
         raise
+        
     except Exception as e:
         logging.error(f"Unexpected error while ensuring index exists: {e}")
+        logging.error(f"Error type: {type(e)}")
+        # Check if it's still a resource_already_exists case in the error message
+        if 'resource_already_exists' in str(e).lower() or 'already exists' in str(e).lower():
+            logging.info(f"Index '{index_name}' already exists (caught in generic exception).")
+            return True
         raise
 
 
@@ -598,6 +675,25 @@ def parallel_bulk_index(dbf_directory):
             f"Failed to list DBF files in directory {dbf_directory}: {str(e)}")
         return
 
+    # Pre-create all indices to avoid race conditions during parallel processing
+    logging.info("Pre-creating all required indices to avoid race conditions...")
+    indices_to_create = []
+    for dbf_file in dbf_files:
+        index_name = f"{ES_INDEX_NAME_PREFIX}{os.path.splitext(dbf_file)[0]}".lower(
+        ).replace(" ", "_").replace("-", "_")
+        indices_to_create.append((dbf_file, index_name))
+    
+    # Create indices sequentially to avoid conflicts
+    for dbf_file, index_name in indices_to_create:
+        try:
+            logging.info(f"Pre-creating index for '{dbf_file}': {index_name}")
+            safe_ensure_index_exists(index_name)
+        except Exception as e:
+            logging.error(f"Failed to pre-create index '{index_name}' for file '{dbf_file}': {e}")
+            logging.warning(f"Will attempt to create index during processing...")
+    
+    logging.info(f"Index pre-creation completed. Created/verified {len(created_indices)} indices.")
+
     # Process files in batches to control memory usage
     # Reduce batch size relative to worker count
     batch_size = min(total_file_count, NUM_PROCESSES * 2)
@@ -629,8 +725,25 @@ def parallel_bulk_index(dbf_directory):
             ).replace(" ", "_").replace("-", "_")
             dbf_file_path = os.path.join(dbf_directory, dbf_file)
 
-            # Create the index if it doesn't exist
-            ensure_index_exists(index_name)
+            # Create the index if it doesn't exist using the safer method
+            try:
+                safe_ensure_index_exists(index_name)
+            except Exception as index_error:
+                logging.warning(f"Primary index creation failed for '{index_name}': {index_error}")
+                # Fallback: try to check if index exists and create with simpler approach
+                try:
+                    if not es_client.indices.exists(index=index_name):
+                        logging.info(f"Attempting fallback index creation for '{index_name}'...")
+                        # Simple index creation without complex mappings as fallback
+                        es_client.indices.create(index=index_name, ignore=400)  # ignore if exists
+                        logging.info(f"Fallback index creation successful for '{index_name}'")
+                    else:
+                        logging.info(f"Index '{index_name}' already exists (fallback check)")
+                except Exception as fallback_error:
+                    logging.error(f"Fallback index creation also failed for '{index_name}': {fallback_error}")
+                    logging.error(f"Skipping file '{dbf_file}' due to index creation failure.")
+                    failed_files += 1
+                    continue
 
             try:
                 logging.info(
