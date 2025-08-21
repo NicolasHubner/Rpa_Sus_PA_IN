@@ -91,7 +91,10 @@ services:
       - xpack.security.transport.ssl.verification_mode=certificate
       - xpack.license.self_generated.type=trial
       - xpack.ml.use_auto_machine_memory_percent=true
-      - ES_JAVA_OPTS=-Xms4g -Xmx4g
+      - ES_JAVA_OPTS=-Xms6g -Xmx6g
+      - indices.breaker.total.limit=85%
+      - indices.breaker.request.limit=60%
+      - indices.breaker.fielddata.limit=60%
     mem_limit: 8589934592 # 8GB for better memory handling
     ulimits:
       memlock:
@@ -133,7 +136,10 @@ services:
       - xpack.security.transport.ssl.verification_mode=certificate
       - xpack.license.self_generated.type=trial
       - xpack.ml.use_auto_machine_memory_percent=true
-      - ES_JAVA_OPTS=-Xms4g -Xmx4g
+      - ES_JAVA_OPTS=-Xms6g -Xmx6g
+      - indices.breaker.total.limit=85%
+      - indices.breaker.request.limit=60%
+      - indices.breaker.fielddata.limit=60%
     mem_limit: 8589934592 # 8GB for better memory handling
     ulimits:
       memlock:
@@ -175,7 +181,10 @@ services:
       - xpack.security.transport.ssl.verification_mode=certificate
       - xpack.license.self_generated.type=trial
       - xpack.ml.use_auto_machine_memory_percent=true
-      - ES_JAVA_OPTS=-Xms4g -Xmx4g
+      - ES_JAVA_OPTS=-Xms6g -Xmx6g
+      - indices.breaker.total.limit=85%
+      - indices.breaker.request.limit=60%
+      - indices.breaker.fielddata.limit=60%
     mem_limit: 8589934592 # 8GB for better memory handling
     ulimits:
       memlock:
