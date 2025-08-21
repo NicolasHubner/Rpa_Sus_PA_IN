@@ -365,131 +365,54 @@ def prepare_es_doc(record, index_name, fields_to_include=COLUNS_TO_WATCH_PA_2008
 
 def safe_ensure_index_exists(index_name: str):
     """
-    Thread-safe wrapper for ensuring index exists.
-    Returns True if successful, False if failed (but continues processing).
+    Simple wrapper - just try to create the index and continue regardless.
     """
-    # Quick check without lock first
+    # Quick check without lock
     if index_name in created_indices:
         return True
-            
-    with indices_lock:
-        # Double-check inside the lock
-        if index_name in created_indices:
-            return True
-            
-        try:
-            # Fast existence check
-            if es_client.indices.exists(index=index_name):
+    
+    try:
+        result = ensure_index_exists(index_name)
+        if result:
+            with indices_lock:
                 created_indices.add(index_name)
-                logging.debug(f"Index '{index_name}' already exists.")
-                return True
-            
-            # Try to create the index
-            result = ensure_index_exists(index_name)
-            if result:
-                created_indices.add(index_name)
-                return True
-            else:
-                logging.warning(f"Failed to create index '{index_name}', will try simple creation")
-                # Fallback: simple creation
-                try:
-                    es_client.indices.create(index=index_name, ignore=400, timeout='10s')
-                    created_indices.add(index_name)
-                    logging.info(f"Simple index creation successful for '{index_name}'")
-                    return True
-                except Exception as simple_error:
-                    logging.error(f"Simple index creation also failed for '{index_name}': {simple_error}")
-                    return False
-            
-        except Exception as e:
-            logging.warning(f"Exception in safe_ensure_index_exists for '{index_name}': {e}")
-            # Last attempt with ignore=400
-            try:
-                es_client.indices.create(index=index_name, ignore=400, timeout='10s')
-                created_indices.add(index_name)
-                logging.info(f"Final fallback index creation successful for '{index_name}'")
-                return True
-            except Exception as final_error:
-                logging.error(f"All index creation methods failed for '{index_name}': {final_error}")
-                return False
+        return result
+    except Exception as e:
+        logging.warning(f"Index creation failed for '{index_name}': {e}")
+        return False
 
 
 def ensure_index_exists(index_name: str):
     """
-    Ensure that an Elasticsearch index exists, with robust error handling.
-    Simplified version without retry to prevent hanging.
+    Simple and reliable index creation - no retries, no complex logic.
+    Just try to create and ignore if it already exists.
     """
     try:
-        # Quick check if the index exists
-        if es_client.indices.exists(index=index_name):
-            logging.info(f"Index '{index_name}' already exists.")
-            return True
-            
-        # Try to create the index
-        logging.info(f"Creating index '{index_name}'...")
+        # Simple approach: just try to create with ignore=400
         es_client.indices.create(
             index=index_name,
             body={
                 "settings": {
-                    "number_of_shards": 1,  # Reduced for faster creation
-                    "number_of_replicas": 0,  # No replicas for faster indexing
-                    "refresh_interval": "30s",
-                    "translog": {
-                        "durability": "async",
-                        "sync_interval": "30s"
-                    }
-                },
-                "mappings": {
-                    "properties": {
-                        "PA_CODUNI": {"type": "keyword"},
-                        "PA_GESTAO": {"type": "keyword"},
-                        "PA_UFMUN": {"type": "keyword"},
-                        "PA_CNPJCPF": {"type": "keyword"},
-                        "PA_CNPJMNT": {"type": "keyword"},
-                        "PA_MVM": {"type": "keyword"},
-                        "PA_CMP": {"type": "keyword"},
-                        "PA_PROC_ID": {"type": "keyword"},
-                        "PA_TPFIN": {"type": "keyword"},
-                        "PA_SUBFIN": {"type": "keyword"},
-                        "PA_CBOCOD": {"type": "keyword"},
-                        "PA_CIDPRI": {"type": "keyword"},
-                        "PA_CODPRO": {"type": "keyword"},
-                        "PA_QTDPRO": {"type": "integer"},
-                        "PA_QTDAPR": {"type": "integer"},
-                        "PA_VALPRO": {"type": "float"},
-                        "PA_VALAPR": {"type": "float"},
-                        "@DATA": {"type": "date"},
-                        "VAL_GERAL": {"type": "float"},
-                        "CNPJ_CPF": {"type": "keyword"},
-                        "SOURCE": {"type": "keyword"},
-                    }
+                    "number_of_shards": 1,
+                    "number_of_replicas": 0,
+                    "refresh_interval": "30s"
                 }
             },
-            timeout='30s'  # Add timeout to prevent hanging
+            ignore=[400, 404],  # Ignore "already exists" and "not found" errors
+            timeout='10s'
         )
-        logging.info(f"Index '{index_name}' created successfully.")
+        logging.info(f"Index '{index_name}' created or already exists.")
         return True
         
-    except exceptions.ConnectionError as ce:
-        logging.error(f"Connection error while creating index '{index_name}': {ce}")
-        return False
-        
-    except exceptions.RequestError as re:
-        error_message = str(re).lower()
-        if 'resource_already_exists_exception' in error_message or 'already exists' in error_message:
-            logging.info(f"Index '{index_name}' already exists (resource_already_exists_exception).")
-            return True
-        else:
-            logging.error(f"Request error while creating index '{index_name}': {re}")
-            return False
-            
     except Exception as e:
-        error_message = str(e).lower()
-        if 'resource_already_exists' in error_message or 'already exists' in error_message:
-            logging.info(f"Index '{index_name}' already exists (generic exception).")
+        logging.warning(f"Could not create index '{index_name}': {e}")
+        # Try even simpler creation
+        try:
+            es_client.indices.create(index=index_name, ignore=400, timeout='5s')
+            logging.info(f"Simple index creation for '{index_name}' successful.")
             return True
-        else:
-            logging.error(f"Unexpected error while creating index '{index_name}': {e}")
+        except Exception as e2:
+            logging.error(f"All index creation failed for '{index_name}': {e2}")
             return False
 
 
@@ -692,19 +615,17 @@ def parallel_bulk_index(dbf_directory):
             ).replace(" ", "_").replace("-", "_")
             batch_indices.append((dbf_file, index_name))
         
-        # Create indices for this batch sequentially (faster than individual creation)
-        logging.info(f"Creating indices for batch of {len(batch_files)} files...")
-        successful_indices = 0
+        # Quick index creation for this batch (non-blocking)
+        logging.info(f"Quick index setup for batch of {len(batch_files)} files...")
         for dbf_file, index_name in batch_indices:
+            # Just try once, don't block if it fails
             try:
-                if safe_ensure_index_exists(index_name):
-                    successful_indices += 1
-                else:
-                    logging.warning(f"Failed to create index for '{dbf_file}', will attempt during processing")
-            except Exception as e:
-                logging.warning(f"Index creation error for '{dbf_file}': {e}")
+                es_client.indices.create(index=index_name, ignore=400, timeout='5s')
+                created_indices.add(index_name)
+            except:
+                pass  # Ignore all errors, will try during processing
         
-        logging.info(f"Batch index creation: {successful_indices}/{len(batch_files)} indices created/verified")
+        logging.info(f"Starting data processing for batch...")
 
         # Process files in this batch
         for dbf_file in batch_files:
@@ -712,13 +633,15 @@ def parallel_bulk_index(dbf_directory):
             ).replace(" ", "_").replace("-", "_")
             dbf_file_path = os.path.join(dbf_directory, dbf_file)
 
-            # Quick index check (most indices should already be created in batch)
+            # Ensure index exists (quick attempt)
             if index_name not in created_indices:
-                logging.info(f"Creating index on-demand for '{dbf_file}': {index_name}")
-                if not safe_ensure_index_exists(index_name):
-                    logging.error(f"Could not create index for '{dbf_file}'. Skipping this file.")
-                    failed_files += 1
-                    continue
+                try:
+                    es_client.indices.create(index=index_name, ignore=400, timeout='5s')
+                    created_indices.add(index_name)
+                    logging.info(f"Index created for '{dbf_file}'")
+                except Exception as ie:
+                    logging.warning(f"Index creation failed for '{dbf_file}': {ie}")
+                    # Continue anyway - let Elasticsearch handle it during bulk indexing
 
             try:
                 logging.info(
