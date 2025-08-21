@@ -366,30 +366,41 @@ def prepare_es_doc(record, index_name, fields_to_include=COLUNS_TO_WATCH_PA_2008
 def safe_ensure_index_exists(index_name: str):
     """
     Thread-safe wrapper for ensuring index exists.
-    Uses a global set to track created indices and avoid redundant creation attempts.
+    Optimized for batch processing - uses cache to avoid redundant operations.
     """
+    # Quick check without lock first
+    if index_name in created_indices:
+        return True
+            
     with indices_lock:
+        # Double-check inside the lock
         if index_name in created_indices:
-            logging.debug(f"Index '{index_name}' already confirmed to exist.")
             return True
             
         try:
+            # Fast path: just check if exists first
+            if es_client.indices.exists(index=index_name):
+                created_indices.add(index_name)
+                logging.debug(f"Index '{index_name}' already exists (verified).")
+                return True
+            
+            # Create the index
             result = ensure_index_exists(index_name)
             if result:
                 created_indices.add(index_name)
-                logging.info(f"Index '{index_name}' added to created indices cache.")
             return result
+            
         except Exception as e:
-            logging.error(f"Failed to ensure index '{index_name}' exists: {e}")
-            # Check if the index exists despite the error
+            logging.warning(f"Failed to ensure index '{index_name}' exists: {e}")
+            # Last resort: try simple creation
             try:
-                if es_client.indices.exists(index=index_name):
-                    logging.info(f"Index '{index_name}' exists despite creation error.")
-                    created_indices.add(index_name)
-                    return True
-            except Exception as verify_error:
-                logging.error(f"Failed to verify index existence: {verify_error}")
-            raise
+                es_client.indices.create(index=index_name, ignore=400)
+                created_indices.add(index_name)
+                logging.info(f"Simple index creation successful for '{index_name}'")
+                return True
+            except Exception as simple_error:
+                logging.error(f"All index creation attempts failed for '{index_name}': {simple_error}")
+                raise
 
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=8))
@@ -675,75 +686,66 @@ def parallel_bulk_index(dbf_directory):
             f"Failed to list DBF files in directory {dbf_directory}: {str(e)}")
         return
 
-    # Pre-create all indices to avoid race conditions during parallel processing
-    logging.info("Pre-creating all required indices to avoid race conditions...")
-    indices_to_create = []
-    for dbf_file in dbf_files:
-        index_name = f"{ES_INDEX_NAME_PREFIX}{os.path.splitext(dbf_file)[0]}".lower(
-        ).replace(" ", "_").replace("-", "_")
-        indices_to_create.append((dbf_file, index_name))
+    # Process files in batches of 10 to optimize index creation and processing
+    batch_size = 10  # Fixed batch size for optimal performance
     
-    # Create indices sequentially to avoid conflicts
-    for dbf_file, index_name in indices_to_create:
-        try:
-            logging.info(f"Pre-creating index for '{dbf_file}': {index_name}")
-            safe_ensure_index_exists(index_name)
-        except Exception as e:
-            logging.error(f"Failed to pre-create index '{index_name}' for file '{dbf_file}': {e}")
-            logging.warning(f"Will attempt to create index during processing...")
-    
-    logging.info(f"Index pre-creation completed. Created/verified {len(created_indices)} indices.")
-
-    # Process files in batches to control memory usage
-    # Reduce batch size relative to worker count
-    batch_size = min(total_file_count, NUM_PROCESSES * 2)
-
     # Calculate optimal worker count based on available system resources
     total_memory_gb = psutil.virtual_memory().total / (1024 * 1024 * 1024)
     cpu_count = os.cpu_count() or 1
 
-    # Allocate ~1GB per worker, but cap at CPU count or 8, whichever is lower
-    optimal_workers = min(int(total_memory_gb / 1.5), cpu_count, NUM_PROCESSES)
+    # Allocate ~1GB per worker, but cap at CPU count or 4 for batch processing
+    optimal_workers = min(int(total_memory_gb / 1.5), cpu_count, 4)
+    worker_count = max(1, min(optimal_workers, 4))  # Limit to 4 workers for batch processing
 
-    # Use at least 1 worker, but no more than 8
-    worker_count = max(1, min(optimal_workers, NUM_PROCESSES))
-
-    logging.info(
-        f"System has {cpu_count} CPUs and {total_memory_gb:.1f}GB RAM")
-    logging.info(f"Using {worker_count} worker processes")
+    logging.info(f"System has {cpu_count} CPUs and {total_memory_gb:.1f}GB RAM")
+    logging.info(f"Using {worker_count} worker processes for batch processing of {batch_size} files at a time")
 
     for batch_start in range(0, total_file_count, batch_size):
         batch_end = min(batch_start + batch_size, total_file_count)
         batch_files = dbf_files[batch_start:batch_end]
 
-        logging.info(
-            f"Processing batch of {len(batch_files)} files ({batch_start+1}-{batch_end} of {total_file_count})")
+        logging.info(f"Processing batch {(batch_start//batch_size)+1}: files {batch_start+1}-{batch_end} of {total_file_count}")
+        
+        # Pre-create indices for this batch only
+        batch_indices = []
+        for dbf_file in batch_files:
+            index_name = f"{ES_INDEX_NAME_PREFIX}{os.path.splitext(dbf_file)[0]}".lower(
+            ).replace(" ", "_").replace("-", "_")
+            batch_indices.append((dbf_file, index_name))
+        
+        # Create indices for this batch sequentially (faster than individual creation)
+        logging.info(f"Creating indices for batch of {len(batch_files)} files...")
+        for dbf_file, index_name in batch_indices:
+            try:
+                safe_ensure_index_exists(index_name)
+            except Exception as e:
+                logging.warning(f"Failed to pre-create index '{index_name}': {e}")
+        
+        logging.info(f"Batch index creation completed. Starting data processing...")
 
-        # Process one file at a time to avoid race conditions
+        # Process files in this batch
         for dbf_file in batch_files:
             index_name = f"{ES_INDEX_NAME_PREFIX}{os.path.splitext(dbf_file)[0]}".lower(
             ).replace(" ", "_").replace("-", "_")
             dbf_file_path = os.path.join(dbf_directory, dbf_file)
 
-            # Create the index if it doesn't exist using the safer method
-            try:
-                safe_ensure_index_exists(index_name)
-            except Exception as index_error:
-                logging.warning(f"Primary index creation failed for '{index_name}': {index_error}")
-                # Fallback: try to check if index exists and create with simpler approach
+            # Quick index check (most indices should already be created in batch)
+            if index_name not in created_indices:
                 try:
-                    if not es_client.indices.exists(index=index_name):
-                        logging.info(f"Attempting fallback index creation for '{index_name}'...")
-                        # Simple index creation without complex mappings as fallback
-                        es_client.indices.create(index=index_name, ignore=400)  # ignore if exists
+                    logging.info(f"Creating index on-demand for '{dbf_file}': {index_name}")
+                    safe_ensure_index_exists(index_name)
+                except Exception as index_error:
+                    logging.warning(f"On-demand index creation failed for '{index_name}': {index_error}")
+                    # Try simple fallback
+                    try:
+                        es_client.indices.create(index=index_name, ignore=400)
+                        created_indices.add(index_name)
                         logging.info(f"Fallback index creation successful for '{index_name}'")
-                    else:
-                        logging.info(f"Index '{index_name}' already exists (fallback check)")
-                except Exception as fallback_error:
-                    logging.error(f"Fallback index creation also failed for '{index_name}': {fallback_error}")
-                    logging.error(f"Skipping file '{dbf_file}' due to index creation failure.")
-                    failed_files += 1
-                    continue
+                    except Exception as fallback_error:
+                        logging.error(f"All index creation methods failed for '{index_name}': {fallback_error}")
+                        logging.error(f"Skipping file '{dbf_file}'")
+                        failed_files += 1
+                        continue
 
             try:
                 logging.info(
@@ -796,17 +798,29 @@ def parallel_bulk_index(dbf_directory):
 
         # Clear memory after processing the batch
         clear_memory()
-        # Clear CNPJ-CPF conversion map to free up memory
 
         # Log progress after each batch
         current_elapsed = time.time() - start_time
         current_minutes = int(current_elapsed // 60)
         current_seconds = current_elapsed % 60
-        logging.info(
-            f"Batch complete: {batch_end}/{total_file_count} files processed")
-        logging.info(
-            f"Current progress: {total_processed} records indexed in {current_minutes}m {current_seconds:.2f}s")
-        logging.info(f"Memory cleared after batch processing")
+        
+        batch_num = (batch_start // batch_size) + 1
+        total_batches = (total_file_count + batch_size - 1) // batch_size
+        
+        logging.info("=" * 60)
+        logging.info(f"BATCH {batch_num}/{total_batches} COMPLETED")
+        logging.info(f"Files processed in this batch: {len(batch_files)}")
+        logging.info(f"Total files processed so far: {batch_end}/{total_file_count}")
+        logging.info(f"Total records indexed so far: {total_processed}")
+        logging.info(f"Time elapsed: {current_minutes}m {current_seconds:.1f}s")
+        
+        if batch_num < total_batches:
+            estimated_remaining = (current_elapsed / batch_end) * (total_file_count - batch_end)
+            est_minutes = int(estimated_remaining // 60)
+            est_seconds = estimated_remaining % 60
+            logging.info(f"Estimated time remaining: {est_minutes}m {est_seconds:.1f}s")
+        
+        logging.info("=" * 60)
         logging.info("\n")
 
     elapsed_time = time.time() - start_time
