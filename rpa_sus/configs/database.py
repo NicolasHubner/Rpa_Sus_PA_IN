@@ -6,7 +6,7 @@ load_dotenv()
 # Replace with your Elasticsearch host
 ELASTICSEARCH_HOST = "https://localhost:9200"
 ES_INDEX_NAME_PREFIX = os.getenv('ES_INDEX_NAME_PREFIX')
-CHUNK_SIZE = 2000  # Adjust the chunk size for bulk indexing
+CHUNK_SIZE = 1000  # Adjust the chunk size for bulk indexing
 ELASTIC_USERNAME = os.getenv('ELASTIC_USERNAME')
 ELASTIC_PASSWORD = os.getenv('DATABASE_ELASTIC_PASSWORD')
 
