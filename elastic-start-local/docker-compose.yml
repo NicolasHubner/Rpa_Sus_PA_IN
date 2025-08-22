@@ -76,7 +76,7 @@ services:
       - cluster.initial_master_nodes=es01,es02,es03
       - discovery.seed_hosts=es02,es03
       - ELASTIC_PASSWORD=nicolasprojetoflavio22
-      - bootstrap.memory_lock=false
+      - bootstrap.memory_lock=true
       - xpack.security.enabled=true
       - xpack.security.http.ssl.enabled=true
       - xpack.security.http.ssl.key=certs/es01/es01.key
@@ -93,7 +93,7 @@ services:
       - indices.breaker.total.limit=85%
       - indices.breaker.request.limit=60%
       - indices.breaker.fielddata.limit=60%
-    mem_limit: 1288490112 # 12GB for better memory handling
+    mem_limit: 12884901888 # This is actually 12GB
     ulimits:
       memlock:
         soft: -1
@@ -121,7 +121,7 @@ services:
       - cluster.initial_master_nodes=es01,es02,es03
       - discovery.seed_hosts=es01,es03
       - ELASTIC_PASSWORD=nicolasprojetoflavio22
-      - bootstrap.memory_lock=false
+      - bootstrap.memory_lock=true
       - xpack.security.enabled=true
       - xpack.security.http.ssl.enabled=true
       - xpack.security.http.ssl.key=certs/es02/es02.key
@@ -138,7 +138,7 @@ services:
       - indices.breaker.total.limit=85%
       - indices.breaker.request.limit=60%
       - indices.breaker.fielddata.limit=60%
-    mem_limit: 1288490112 # 12GB for better memory handling
+    mem_limit: 12884901888 # This is actually 12GB
     ulimits:
       memlock:
         soft: -1
@@ -166,7 +166,7 @@ services:
       - cluster.initial_master_nodes=es01,es02,es03
       - discovery.seed_hosts=es01,es02
       - ELASTIC_PASSWORD=nicolasprojetoflavio22
-      - bootstrap.memory_lock=false
+      - bootstrap.memory_lock=true
       - xpack.security.enabled=true
       - xpack.security.http.ssl.enabled=true
       - xpack.security.http.ssl.key=certs/es03/es03.key
@@ -183,7 +183,7 @@ services:
       - indices.breaker.total.limit=85%
       - indices.breaker.request.limit=60%
       - indices.breaker.fielddata.limit=60%
-    mem_limit: 1288490112 # 12GB for better memory handling
+    mem_limit: 12884901888 # This is actually 12GB
     ulimits:
       memlock:
         soft: -1
