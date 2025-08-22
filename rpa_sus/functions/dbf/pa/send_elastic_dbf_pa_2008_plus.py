@@ -88,13 +88,16 @@ try:
         retry_on_timeout=True,
         verify_certs=False,  # Disable SSL certificate verification
         max_retries=MAX_RETRIES,
-        request_timeout=90,  # Initial request timeout
-    ).options(request_timeout=180)  # Increase request timeout to 180 seconds for large batches
+    ).options(request_timeout=120)  # Increase request timeout to 120 seconds
 
     # Check if the connection is successful
     if es_client.ping():
         logging.info("Connected to Elasticsearch!")
 
+except Exception as connection_error:
+    logging.error(f"Elasticsearch connection failed: {connection_error}")
+    logging.error(f"Traceback: {traceback.format_exc()}")
+    sys.exit(1)
 except Exception as connection_error:
     logging.error(f"Elasticsearch connection failed: {connection_error}")
     logging.error(f"Traceback: {traceback.format_exc()}")
