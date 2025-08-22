@@ -91,7 +91,7 @@ services:
       - xpack.security.transport.ssl.verification_mode=certificate
       - xpack.license.self_generated.type=trial
       - xpack.ml.use_auto_machine_memory_percent=true
-      - ES_JAVA_OPTS=-Xms6g -Xmx6g
+      - ES_JAVA_OPTS=-Xms8g -Xmx8g
       - indices.breaker.total.limit=85%
       - indices.breaker.request.limit=60%
       - indices.breaker.fielddata.limit=60%
@@ -136,7 +136,7 @@ services:
       - xpack.security.transport.ssl.verification_mode=certificate
       - xpack.license.self_generated.type=trial
       - xpack.ml.use_auto_machine_memory_percent=true
-      - ES_JAVA_OPTS=-Xms6g -Xmx6g
+      - ES_JAVA_OPTS=-Xms8g -Xmx8g
       - indices.breaker.total.limit=85%
       - indices.breaker.request.limit=60%
       - indices.breaker.fielddata.limit=60%
@@ -181,7 +181,7 @@ services:
       - xpack.security.transport.ssl.verification_mode=certificate
       - xpack.license.self_generated.type=trial
       - xpack.ml.use_auto_machine_memory_percent=true
-      - ES_JAVA_OPTS=-Xms6g -Xmx6g
+      - ES_JAVA_OPTS=-Xms8g -Xmx8g
       - indices.breaker.total.limit=85%
       - indices.breaker.request.limit=60%
       - indices.breaker.fielddata.limit=60%
