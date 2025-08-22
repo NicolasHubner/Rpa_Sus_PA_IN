@@ -88,7 +88,7 @@ try:
         retry_on_timeout=True,
         verify_certs=False,  # Disable SSL certificate verification
         max_retries=MAX_RETRIES,
-        timeout=180,  # Increased timeout for larger operations
+        request_timeout=90,  # Initial request timeout
     ).options(request_timeout=180)  # Increase request timeout to 180 seconds for large batches
 
     # Check if the connection is successful
