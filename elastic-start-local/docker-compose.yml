@@ -91,11 +91,11 @@ services:
       - xpack.security.transport.ssl.verification_mode=certificate
       - xpack.license.self_generated.type=trial
       - xpack.ml.use_auto_machine_memory_percent=true
-      - ES_JAVA_OPTS=-Xms10g -Xmx10g
-      - indices.breaker.total.limit=85%
-      - indices.breaker.request.limit=60%
-      - indices.breaker.fielddata.limit=60%
+      - ES_JAVA_OPTS=-Xms8g -Xmx8g
     mem_limit: 12884901888 # 12GB for better memory handling
+    restart: unless-stopped
+    networks:
+      - elasticnet
     ulimits:
       memlock:
         soft: -1
@@ -136,11 +136,11 @@ services:
       - xpack.security.transport.ssl.verification_mode=certificate
       - xpack.license.self_generated.type=trial
       - xpack.ml.use_auto_machine_memory_percent=true
-      - ES_JAVA_OPTS=-Xms10g -Xmx10g
-      - indices.breaker.total.limit=85%
-      - indices.breaker.request.limit=60%
-      - indices.breaker.fielddata.limit=60%
+      - ES_JAVA_OPTS=-Xms8g -Xmx8g
     mem_limit: 12884901888 # 12GB for better memory handling
+    restart: unless-stopped
+    networks:
+      - elasticnet
     ulimits:
       memlock:
         soft: -1
@@ -181,11 +181,11 @@ services:
       - xpack.security.transport.ssl.verification_mode=certificate
       - xpack.license.self_generated.type=trial
       - xpack.ml.use_auto_machine_memory_percent=true
-      - ES_JAVA_OPTS=-Xms10g -Xmx10g
-      - indices.breaker.total.limit=85%
-      - indices.breaker.request.limit=60%
-      - indices.breaker.fielddata.limit=60%
+      - ES_JAVA_OPTS=-Xms8g -Xmx8g
     mem_limit: 12884901888 # 12GB for better memory handling
+    restart: unless-stopped
+    networks:
+      - elasticnet
     ulimits:
       memlock:
         soft: -1
@@ -221,6 +221,9 @@ services:
       - ELASTICSEARCH_PASSWORD=nicolasprojetoflavio22
       - ELASTICSEARCH_SSL_CERTIFICATEAUTHORITIES=config/certs/ca/ca.crt
     mem_limit: 12884901888 # 12GB for better performance
+    restart: unless-stopped
+    networks:
+      - elasticnet
     healthcheck:
       test:
         [
@@ -242,3 +245,7 @@ volumes:
     driver: local
   kibanadata:
     driver: local
+
+networks:
+  elasticnet:
+    driver: bridge
