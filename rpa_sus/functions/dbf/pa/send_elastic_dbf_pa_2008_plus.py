@@ -88,7 +88,9 @@ try:
         retry_on_timeout=True,
         verify_certs=False,  # Disable SSL certificate verification
         max_retries=MAX_RETRIES,
-    ).options(request_timeout=120)  # Increase request timeout to 120 seconds
+        timeout=180,  # Increased timeout for larger operations
+        max_connections=20,  # Increased connection pool for better throughput
+    ).options(request_timeout=180)  # Increase request timeout to 180 seconds for large batches
 
     # Check if the connection is successful
     if es_client.ping():
@@ -393,13 +395,16 @@ def ensure_index_exists(index_name: str):
             index=index_name,
             body={
                 "settings": {
-                    "number_of_shards": 1,
-                    "number_of_replicas": 0,
-                    "refresh_interval": "30s"
+                    "number_of_shards": 2,  # Increased shards for better performance
+                    "number_of_replicas": 0,  # Keep replicas at 0 for faster indexing
+                    "refresh_interval": "60s",  # Increased refresh interval for better performance
+                    "index.max_result_window": 100000,  # Increased for larger result sets
+                    "index.mapping.total_fields.limit": 2000,  # Increased field limit
+                    "index.max_docvalue_fields_search": 200,  # Increased for better aggregations
                 }
             },
             ignore=[400, 404],  # Ignore "already exists" and "not found" errors
-            timeout='10s'
+            timeout='15s'  # Increased timeout
         )
         logging.info(f"Index '{index_name}' created or already exists.")
         return True
@@ -408,7 +413,7 @@ def ensure_index_exists(index_name: str):
         logging.warning(f"Could not create index '{index_name}': {e}")
         # Try even simpler creation
         try:
-            es_client.indices.create(index=index_name, ignore=400, timeout='5s')
+            es_client.indices.create(index=index_name, ignore=400, timeout='10s')  # Increased timeout
             logging.info(f"Simple index creation for '{index_name}' successful.")
             return True
         except Exception as e2:
@@ -467,13 +472,13 @@ def process_chunk(data_chunk, index_name, chunk_index, dbf_file):
         success_count = 0
         failed_documents = 0
 
-        # Use a much smaller chunk size for streaming_bulk to avoid memory issues
-        streaming_chunk_size = min(100, INT_CHUNK_SIZE // 5)  # Much smaller chunks
+        # Use a larger chunk size for streaming_bulk to take advantage of 64GB RAM
+        streaming_chunk_size = min(500, INT_CHUNK_SIZE // 2)  # Larger chunks with more RAM
 
         start_time = time.time()
 
-        # Add delay before processing to avoid 429 errors
-        delay = random.uniform(1.0, 3.0)  # Longer random delay
+        # Reduced delay since we have more resources
+        delay = random.uniform(0.5, 1.5)  # Shorter delay with better hardware
         time.sleep(delay)
 
         # Use helpers.bulk instead of streaming_bulk for better handling of document IDs
@@ -531,15 +536,15 @@ def process_chunk(data_chunk, index_name, chunk_index, dbf_file):
             
         except exceptions.ConnectionError as e:
             if "429" in str(e) or "Too Many Requests" in str(e) or "circuit_breaking_exception" in str(e):
-                # Handle 429 and circuit breaker errors with longer delay
-                logging.warning(f"Rate limited or circuit breaker triggered, sleeping for 30 seconds before retry...")
-                time.sleep(30)
-                # Retry once more with even smaller chunk size
+                # Handle 429 and circuit breaker errors with shorter delay for better hardware
+                logging.warning(f"Rate limited or circuit breaker triggered, sleeping for 15 seconds before retry...")
+                time.sleep(15)  # Reduced delay with better hardware
+                # Retry once more with smaller chunk size
                 try:
                     results = helpers.bulk(
                         client=es_client,
                         actions=actions,
-                        chunk_size=streaming_chunk_size//4,  # Even smaller chunk size
+                        chunk_size=streaming_chunk_size//2,  # Smaller chunk size for retry
                         max_retries=MAX_RETRIES,
                         stats_only=False
                     )
@@ -555,8 +560,8 @@ def process_chunk(data_chunk, index_name, chunk_index, dbf_file):
         logging.info(
             f"Chunk {chunk_index} complete: {success_count} indexed, {failed_documents} failed in {duration:.2f}s")
 
-        # Add a longer delay after processing to prevent overwhelming ES
-        time.sleep(0.5)  # Increased delay
+        # Reduced delay after processing since we have better hardware
+        time.sleep(0.2)  # Reduced delay with better resources
 
         return success_count
 
@@ -588,16 +593,16 @@ def parallel_bulk_index(dbf_directory):
             f"Failed to list DBF files in directory {dbf_directory}: {str(e)}")
         return
 
-    # Process files in batches of 5 to reduce memory pressure
-    batch_size = 5  # Reduced batch size for better memory management
+    # Process files in batches of 12 to better utilize 64GB RAM
+    batch_size = 12  # Increased batch size for better memory management with 64GB RAM
     
     # Calculate optimal worker count based on available system resources
     total_memory_gb = psutil.virtual_memory().total / (1024 * 1024 * 1024)
     cpu_count = os.cpu_count() or 1
 
-    # Use fewer workers to reduce memory pressure
-    optimal_workers = min(int(total_memory_gb / 2), cpu_count, 2)
-    worker_count = max(1, min(optimal_workers, 2))  # Limit to 2 workers max
+    # Use more workers to take advantage of 8 CPU cores and 64GB RAM
+    optimal_workers = min(cpu_count, 8)  # Use all 8 cores
+    worker_count = max(4, optimal_workers)  # Minimum 4 workers, up to 8
 
     logging.info(f"System has {cpu_count} CPUs and {total_memory_gb:.1f}GB RAM")
     logging.info(f"Using {worker_count} worker processes for batch processing of {batch_size} files at a time")
@@ -662,11 +667,11 @@ def parallel_bulk_index(dbf_directory):
                             process_chunk_with_retry, data_chunk, index_name, chunk_index, dbf_file)
                         futures.append(future)
                         
-                        # Add delay between chunk submissions to avoid overwhelming ES
-                        if file_chunks % 3 == 0:  # Every 3 chunks, add a longer delay
-                            time.sleep(2.0)  # Longer delay
+                        # Reduced delay between chunk submissions with better hardware
+                        if file_chunks % 5 == 0:  # Every 5 chunks, add a short delay
+                            time.sleep(1.0)  # Shorter delay
                         else:
-                            time.sleep(0.5)  # Increased base delay
+                            time.sleep(0.2)  # Reduced base delay
 
                     logging.info(
                         f"Submitted {file_chunks} chunks for processing from file {dbf_file}")
@@ -684,8 +689,8 @@ def parallel_bulk_index(dbf_directory):
 
                     logging.info(f"Completed processing file {dbf_file}: {file_processed} records indexed")
 
-                # Add longer delay between files to prevent ES overload
-                time.sleep(5.0)  # Increased delay between files
+                # Reduced delay between files with better hardware
+                time.sleep(2.0)  # Reduced delay between files
 
             except Exception as e:
                 failed_files += 1
