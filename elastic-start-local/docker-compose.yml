@@ -211,6 +211,7 @@ services:
       - ELASTICSEARCH_USERNAME=kibana_system
       - ELASTICSEARCH_PASSWORD=nicolasprojetoflavio22
       - ELASTICSEARCH_SSL_CERTIFICATEAUTHORITIES=config/certs/ca/ca.crt
+      - NODE_OPTIONS=--no-deprecation
     mem_limit: 62914560 # 6GB for better memory handling
     healthcheck:
       test:
