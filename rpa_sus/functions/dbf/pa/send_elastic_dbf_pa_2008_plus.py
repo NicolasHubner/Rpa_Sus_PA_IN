@@ -89,7 +89,6 @@ try:
         verify_certs=False,  # Disable SSL certificate verification
         max_retries=MAX_RETRIES,
         timeout=180,  # Increased timeout for larger operations
-        max_connections=20,  # Increased connection pool for better throughput
     ).options(request_timeout=180)  # Increase request timeout to 180 seconds for large batches
 
     # Check if the connection is successful
