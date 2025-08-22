@@ -91,11 +91,8 @@ services:
       - xpack.security.transport.ssl.verification_mode=certificate
       - xpack.license.self_generated.type=trial
       - xpack.ml.use_auto_machine_memory_percent=true
-      - ES_JAVA_OPTS=-Xms8g -Xmx8g
+      - ES_JAVA_OPTS=-Xms9g -Xmx9g
     mem_limit: 12884901888 # 12GB for better memory handling
-    restart: unless-stopped
-    networks:
-      - elasticnet
     ulimits:
       memlock:
         soft: -1
@@ -136,11 +133,8 @@ services:
       - xpack.security.transport.ssl.verification_mode=certificate
       - xpack.license.self_generated.type=trial
       - xpack.ml.use_auto_machine_memory_percent=true
-      - ES_JAVA_OPTS=-Xms8g -Xmx8g
+      - ES_JAVA_OPTS=-Xms9g -Xmx9g
     mem_limit: 12884901888 # 12GB for better memory handling
-    restart: unless-stopped
-    networks:
-      - elasticnet
     ulimits:
       memlock:
         soft: -1
@@ -181,11 +175,8 @@ services:
       - xpack.security.transport.ssl.verification_mode=certificate
       - xpack.license.self_generated.type=trial
       - xpack.ml.use_auto_machine_memory_percent=true
-      - ES_JAVA_OPTS=-Xms8g -Xmx8g
+      - ES_JAVA_OPTS=-Xms9g -Xmx9g
     mem_limit: 12884901888 # 12GB for better memory handling
-    restart: unless-stopped
-    networks:
-      - elasticnet
     ulimits:
       memlock:
         soft: -1
@@ -220,10 +211,7 @@ services:
       - ELASTICSEARCH_USERNAME=kibana_system
       - ELASTICSEARCH_PASSWORD=nicolasprojetoflavio22
       - ELASTICSEARCH_SSL_CERTIFICATEAUTHORITIES=config/certs/ca/ca.crt
-    mem_limit: 12884901888 # 12GB for better performance
-    restart: unless-stopped
-    networks:
-      - elasticnet
+    mem_limit: 62914560 # 6GB for better memory handling
     healthcheck:
       test:
         [
@@ -245,7 +233,3 @@ volumes:
     driver: local
   kibanadata:
     driver: local
-
-networks:
-  elasticnet:
-    driver: bridge
