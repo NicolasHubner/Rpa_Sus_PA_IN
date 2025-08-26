@@ -14,7 +14,7 @@ NUM_INDICES = 165  # number of latest indices to process
 es = Elasticsearch(
     [ELASTICSEARCH_HOST],
     basic_auth=(ELASTIC_USERNAME, ELASTIC_PASSWORD),
-    verify_certs=True,
+    verify_certs=False,
     retry_on_timeout=True,
     max_retries=MAX_RETRIES,
 ).options(request_timeout=REQUEST_TIMEOUT)
