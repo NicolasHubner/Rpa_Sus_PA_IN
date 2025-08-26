@@ -5,7 +5,12 @@ AUTH = ("elastic", "nicolasprojetoflavio22")        # se não tiver auth, coloqu
 
 def main():
     # 1. Pegar todos os índices ordenados pela data de criação (mais recentes primeiro)
-    resp = requests.get(f"{ES_URL}/_cat/indices?h=index&s=creation.date:desc", auth=AUTH)
+    resp = requests.get(
+    f"{ES_URL}/_cat/indices?h=index&s=creation.date:desc",
+    auth=AUTH,
+    verify="./certs/ca/ca.crt"
+)
+
     if resp.status_code != 200:
         print("Erro ao listar índices:", resp.text)
         return
