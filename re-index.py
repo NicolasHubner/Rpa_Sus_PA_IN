@@ -1,37 +1,52 @@
-import requests
+from elasticsearch import Elasticsearch
+import time
 
-ES_URL = "http://localhost:9200"   # troque para o endereço do seu cluster
-AUTH = ("elastic", "nicolasprojetoflavio22")        # se não tiver auth, coloque None
+# -------- CONFIG --------
+ELASTICSEARCH_HOST = "https://localhost:9200"  # your ES endpoint
+ELASTIC_USERNAME = "elastic"
+ELASTIC_PASSWORD = "nicolasprojetoflavio22"
+MAX_RETRIES = 5
+REQUEST_TIMEOUT = 120
+NUM_INDICES = 165  # number of latest indices to process
+# ------------------------
 
-def main():
-    # 1. Pegar todos os índices ordenados pela data de criação (mais recentes primeiro)
-    resp = requests.get(
-    f"{ES_URL}/_cat/indices?h=index&s=creation.date:desc",
-    auth=AUTH,
-    verify="./certs/ca/ca.crt"
-)
+# Connect to Elasticsearch
+es = Elasticsearch(
+    [ELASTICSEARCH_HOST],
+    basic_auth=(ELASTIC_USERNAME, ELASTIC_PASSWORD),
+    verify_certs=True,
+    retry_on_timeout=True,
+    max_retries=MAX_RETRIES,
+).options(request_timeout=REQUEST_TIMEOUT)
 
-    if resp.status_code != 200:
-        print("Erro ao listar índices:", resp.text)
-        return
+# Step 1: Get all indices with creation date
+all_indices = es.cat.indices(format="json", h=["index", "creation.date"])
+# Sort by creation date descending and pick the latest 165
+latest_indices = sorted(all_indices, key=lambda x: int(x["creation.date"]), reverse=True)[:NUM_INDICES]
 
-    indices = resp.text.strip().split("\n")
-    selected = indices[:165]  # só os 165 últimos
+print(f"Found {len(latest_indices)} indices to reindex.")
 
-    for index in selected:
-        new_index = f"{index}_sao_paulo"
-        print(f"Reindexando {index} -> {new_index}")
+# Step 2: Reindex each index
+for idx in latest_indices:
+    old_index = idx["index"]
+    new_index = f"{old_index}_sao_paulo"
+    
+    print(f"Reindexing {old_index} -> {new_index} ...")
+    
+    try:
+        resp = es.reindex(
+            body={
+                "source": {"index": old_index},
+                "dest": {"index": new_index}
+            },
+            wait_for_completion=True
+        )
+        print("Done:", resp)
+    except Exception as e:
+        print(f"Error reindexing {old_index}:", e)
+        continue
+    
+    # Optional: short sleep to avoid overwhelming the cluster
+    time.sleep(1)
 
-        payload = {
-            "source": {"index": index},
-            "dest": {"index": new_index}
-        }
-
-        r = requests.post(f"{ES_URL}/_reindex", json=payload, auth=AUTH)
-        if r.status_code not in (200, 201):
-            print(f"Falhou {index}: {r.status_code} {r.text}")
-        else:
-            print("OK:", r.json())
-
-if __name__ == "__main__":
-    main()
+print("All reindex operations completed.")
